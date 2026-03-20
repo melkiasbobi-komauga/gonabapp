@@ -1,0 +1,1609 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GONAB - Platform Digital Nabire</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛵</text></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    :root {
+      --primary: #00b14f;
+      --primary-dark: #009040;
+      --primary-light: #e6f9ee;
+      --secondary: #ff6b35;
+      --accent: #ffd700;
+      --dark: #1a1a2e;
+      --dark2: #16213e;
+      --card: #ffffff;
+      --bg: #f0f4f8;
+      --text: #2d3748;
+      --text-light: #718096;
+      --border: #e2e8f0;
+      --danger: #e53e3e;
+      --warning: #dd6b20;
+      --info: #3182ce;
+      --sidebar-w: 260px;
+      --radius: 12px;
+      --shadow: 0 4px 20px rgba(0,0,0,0.08);
+      --shadow-lg: 0 10px 40px rgba(0,0,0,0.15);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
+
+    /* ===== LOGIN PAGE ===== */
+    #login-page {
+      min-height: 100vh;
+      background: linear-gradient(135deg, #00b14f 0%, #009040 40%, #1a1a2e 100%);
+      display: flex; align-items: center; justify-content: center;
+      position: fixed; inset: 0; z-index: 9999;
+    }
+    .login-card {
+      background: white; border-radius: 24px; padding: 50px 40px;
+      width: 100%; max-width: 420px; box-shadow: var(--shadow-lg);
+      text-align: center;
+    }
+    .login-logo { font-size: 60px; margin-bottom: 10px; }
+    .login-title { font-size: 32px; font-weight: 800; color: var(--primary); letter-spacing: -1px; }
+    .login-subtitle { color: var(--text-light); font-size: 14px; margin-bottom: 30px; margin-top: 4px; }
+    .login-card .form-group { margin-bottom: 16px; text-align: left; }
+    .login-card label { font-size: 13px; font-weight: 600; color: var(--text); display: block; margin-bottom: 6px; }
+    .login-card input {
+      width: 100%; padding: 12px 16px; border: 2px solid var(--border);
+      border-radius: 10px; font-size: 15px; font-family: inherit;
+      transition: border-color 0.2s;
+    }
+    .login-card input:focus { outline: none; border-color: var(--primary); }
+    .login-btn {
+      width: 100%; padding: 14px; background: var(--primary); color: white;
+      border: none; border-radius: 10px; font-size: 16px; font-weight: 700;
+      cursor: pointer; transition: background 0.2s; margin-top: 8px;
+    }
+    .login-btn:hover { background: var(--primary-dark); }
+    .login-error { background: #fff5f5; color: var(--danger); padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-top: 12px; display: none; }
+    .login-badge { background: var(--primary-light); color: var(--primary); padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-top: 20px; display: inline-block; }
+
+    /* ===== MAIN APP ===== */
+    #app { display: none; }
+
+    /* Sidebar */
+    .sidebar {
+      width: var(--sidebar-w); height: 100vh; background: var(--dark);
+      position: fixed; left: 0; top: 0; z-index: 100;
+      display: flex; flex-direction: column; overflow: hidden;
+      transition: transform 0.3s;
+    }
+    .sidebar-header {
+      padding: 24px 20px 20px;
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+      flex-shrink: 0;
+    }
+    .sidebar-logo { display: flex; align-items: center; gap: 10px; }
+    .sidebar-logo-icon { font-size: 36px; }
+    .sidebar-logo-text h1 { font-size: 22px; font-weight: 800; color: white; letter-spacing: -0.5px; }
+    .sidebar-logo-text p { font-size: 11px; color: rgba(255,255,255,0.8); margin-top: 1px; }
+    .sidebar-nav { flex: 1; overflow-y: auto; padding: 12px 0; }
+    .nav-section { padding: 8px 16px 4px; font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.35); text-transform: uppercase; letter-spacing: 1px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 11px 20px; color: rgba(255,255,255,0.65);
+      cursor: pointer; transition: all 0.2s; border-left: 3px solid transparent;
+      font-size: 14px; font-weight: 500;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.08); color: white; }
+    .nav-item.active { background: rgba(0,177,79,0.2); color: var(--primary); border-left-color: var(--primary); }
+    .nav-item i { width: 18px; text-align: center; font-size: 15px; }
+    .nav-badge { margin-left: auto; background: var(--danger); color: white; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; }
+    .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.1); }
+    .admin-info { display: flex; align-items: center; gap: 10px; }
+    .admin-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--primary); display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 14px; }
+    .admin-name { font-size: 13px; font-weight: 600; color: white; }
+    .admin-role { font-size: 11px; color: rgba(255,255,255,0.5); }
+    .logout-btn { margin-left: auto; background: none; border: none; color: rgba(255,255,255,0.5); cursor: pointer; font-size: 16px; padding: 4px; }
+    .logout-btn:hover { color: var(--danger); }
+
+    /* Main Content */
+    .main-content { margin-left: var(--sidebar-w); min-height: 100vh; }
+    .topbar {
+      background: white; padding: 0 28px; height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06); position: sticky; top: 0; z-index: 50;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 16px; }
+    .topbar-title { font-size: 18px; font-weight: 700; }
+    .topbar-right { display: flex; align-items: center; gap: 12px; }
+    .topbar-btn {
+      width: 38px; height: 38px; border-radius: 50%; background: var(--bg);
+      border: none; cursor: pointer; color: var(--text-light); font-size: 16px;
+      display: flex; align-items: center; justify-content: center; position: relative; transition: all 0.2s;
+    }
+    .topbar-btn:hover { background: var(--primary-light); color: var(--primary); }
+    .notif-dot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; background: var(--danger); border-radius: 50%; }
+    .live-badge { background: var(--primary-light); color: var(--primary); font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; display: flex; align-items: center; gap: 5px; }
+    .live-dot { width: 7px; height: 7px; background: var(--primary); border-radius: 50%; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.8)} }
+
+    /* Content Area */
+    .content { padding: 28px; }
+    .page { display: none; }
+    .page.active { display: block; }
+    .page-header { margin-bottom: 24px; }
+    .page-header h2 { font-size: 22px; font-weight: 800; }
+    .page-header p { color: var(--text-light); font-size: 14px; margin-top: 4px; }
+
+    /* Stats Grid */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px; margin-bottom: 28px; }
+    .stat-card {
+      background: white; border-radius: var(--radius); padding: 22px;
+      display: flex; align-items: center; gap: 16px; box-shadow: var(--shadow);
+      transition: transform 0.2s, box-shadow 0.2s; cursor: default;
+    }
+    .stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+    .stat-icon { width: 54px; height: 54px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
+    .stat-icon.green { background: var(--primary-light); color: var(--primary); }
+    .stat-icon.orange { background: #fff3e9; color: var(--secondary); }
+    .stat-icon.blue { background: #ebf4ff; color: var(--info); }
+    .stat-icon.yellow { background: #fffbeb; color: #d69e2e; }
+    .stat-icon.purple { background: #faf5ff; color: #805ad5; }
+    .stat-icon.red { background: #fff5f5; color: var(--danger); }
+    .stat-value { font-size: 26px; font-weight: 800; color: var(--text); line-height: 1; }
+    .stat-label { font-size: 13px; color: var(--text-light); margin-top: 4px; }
+    .stat-change { font-size: 11px; font-weight: 600; margin-top: 4px; }
+    .stat-change.up { color: var(--primary); }
+    .stat-change.down { color: var(--danger); }
+
+    /* Cards */
+    .card { background: white; border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; margin-bottom: 24px; }
+    .card-header { padding: 18px 22px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .card-title { font-size: 15px; font-weight: 700; }
+    .card-body { padding: 22px; }
+
+    /* Tables */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    thead th { background: #f7fafc; padding: 10px 14px; text-align: left; font-weight: 700; color: var(--text-light); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+    tbody td { padding: 12px 14px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: #f8fafc; }
+
+    /* Badges */
+    .badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+    .badge-success { background: #e6f9ee; color: var(--primary); }
+    .badge-warning { background: #fff3e9; color: var(--warning); }
+    .badge-danger { background: #fff5f5; color: var(--danger); }
+    .badge-info { background: #ebf4ff; color: var(--info); }
+    .badge-gray { background: #f0f4f8; color: var(--text-light); }
+    .badge-purple { background: #faf5ff; color: #805ad5; }
+
+    /* Buttons */
+    .btn { padding: 8px 16px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; font-family: inherit; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-danger { background: var(--danger); color: white; }
+    .btn-danger:hover { background: #c53030; }
+    .btn-warning { background: var(--warning); color: white; }
+    .btn-info { background: var(--info); color: white; }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+    .btn-outline { background: transparent; border: 1.5px solid var(--border); color: var(--text); }
+    .btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+
+    /* Grid 2 col */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; }
+
+    /* Search & Filter bar */
+    .filter-bar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+    .filter-bar input, .filter-bar select {
+      padding: 9px 14px; border: 1.5px solid var(--border); border-radius: 8px;
+      font-size: 13px; font-family: inherit; outline: none; background: white;
+      transition: border-color 0.2s;
+    }
+    .filter-bar input:focus, .filter-bar select:focus { border-color: var(--primary); }
+    .filter-bar input { flex: 1; min-width: 200px; }
+
+    /* Service Cards */
+    .services-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; margin-bottom: 28px; }
+    .service-card {
+      background: white; border-radius: var(--radius); padding: 20px 16px;
+      text-align: center; cursor: pointer; box-shadow: var(--shadow);
+      transition: all 0.2s; border: 2px solid transparent;
+    }
+    .service-card:hover { border-color: var(--primary); transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+    .service-icon { font-size: 36px; margin-bottom: 8px; }
+    .service-name { font-size: 13px; font-weight: 700; color: var(--text); }
+    .service-desc { font-size: 11px; color: var(--text-light); margin-top: 3px; }
+
+    /* Map placeholder */
+    .map-container {
+      height: 380px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      border-radius: var(--radius); overflow: hidden; position: relative;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .map-overlay { text-align: center; color: white; }
+    .map-overlay i { font-size: 48px; color: var(--primary); margin-bottom: 16px; opacity: 0.8; }
+    .map-overlay h3 { font-size: 18px; font-weight: 700; }
+    .map-overlay p { font-size: 13px; color: rgba(255,255,255,0.6); margin-top: 6px; }
+    .driver-dots { position: absolute; inset: 0; }
+    .driver-dot {
+      position: absolute; width: 12px; height: 12px; border-radius: 50%;
+      background: var(--primary); border: 2px solid white;
+      animation: float 3s ease-in-out infinite;
+      box-shadow: 0 0 8px rgba(0,177,79,0.6);
+    }
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+
+    /* Alert/Notification */
+    .alert { padding: 12px 16px; border-radius: 10px; font-size: 13px; display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+    .alert-sos { background: #fff5f5; border: 1.5px solid #fc8181; color: var(--danger); animation: blink 1s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.7} }
+    .alert-info { background: #ebf4ff; border: 1.5px solid #90cdf4; color: var(--info); }
+    .alert-warning { background: #fffbeb; border: 1.5px solid #f6e05e; color: var(--warning); }
+
+    /* Forms */
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .form-control {
+      width: 100%; padding: 10px 14px; border: 1.5px solid var(--border);
+      border-radius: 8px; font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.2s;
+    }
+    .form-control:focus { border-color: var(--primary); }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+      z-index: 1000; display: none; align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal { background: white; border-radius: 16px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; }
+    .modal-header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .modal-header h3 { font-size: 16px; font-weight: 700; }
+    .modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-light); padding: 4px; }
+    .modal-body { padding: 24px; }
+    .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+
+    /* Loading */
+    .loading { display: flex; align-items: center; justify-content: center; padding: 40px; }
+    .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 4px; background: #f0f4f8; padding: 4px; border-radius: 10px; margin-bottom: 20px; }
+    .tab-btn { flex: 1; padding: 8px 14px; border: none; background: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text-light); transition: all 0.2s; font-family: inherit; }
+    .tab-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+
+    /* Toast notification */
+    #toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px; }
+    .toast { background: white; border-radius: 10px; padding: 14px 18px; box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 12px; min-width: 280px; font-size: 13.5px; font-weight: 500; animation: slideIn 0.3s ease; border-left: 4px solid var(--primary); }
+    .toast.toast-error { border-left-color: var(--danger); }
+    .toast.toast-warning { border-left-color: var(--warning); }
+    @keyframes slideIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
+
+    /* Profile cards for drivers/merchants */
+    .profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
+    .profile-card { background: white; border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); }
+    .profile-card-header { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+    .avatar { width: 46px; height: 46px; border-radius: 50%; background: var(--primary-light); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; color: var(--primary); flex-shrink: 0; }
+    .profile-card-name { font-size: 15px; font-weight: 700; }
+    .profile-card-sub { font-size: 12px; color: var(--text-light); margin-top: 2px; }
+
+    /* Pagination */
+    .pagination { display: flex; gap: 6px; justify-content: center; margin-top: 20px; }
+    .page-btn { width: 34px; height: 34px; border-radius: 8px; border: 1.5px solid var(--border); background: white; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-light); display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+    .page-btn.active, .page-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar { transform: translateX(-100%); }
+      .sidebar.open { transform: translateX(0); }
+      .main-content { margin-left: 0; }
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .content { padding: 16px; }
+    }
+
+    /* Order status colors */
+    .status-searching { background: #fffbeb; color: #d69e2e; }
+    .status-accepted { background: #ebf4ff; color: var(--info); }
+    .status-on_the_way { background: #faf5ff; color: #805ad5; }
+    .status-completed { background: #e6f9ee; color: var(--primary); }
+    .status-cancelled { background: #fff5f5; color: var(--danger); }
+    .status-pending { background: #fff3e9; color: var(--warning); }
+    .status-confirmed { background: #ebf4ff; color: var(--info); }
+  </style>
+</head>
+<body>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<!-- LOGIN PAGE -->
+<div id="login-page">
+  <div class="login-card">
+    <div class="login-logo">🛵</div>
+    <div class="login-title">GONAB</div>
+    <div class="login-subtitle">Platform Digital Kabupaten Nabire, Papua Tengah</div>
+    <div class="form-group">
+      <label>Nomor HP</label>
+      <input type="text" id="login-phone" placeholder="Contoh: 082199990000" value="082199990000"/>
+    </div>
+    <div class="form-group">
+      <label>Kata Sandi</label>
+      <input type="password" id="login-password" placeholder="Masukkan kata sandi" value="Admin@gonab2024"/>
+    </div>
+    <button class="login-btn" onclick="doLogin()">
+      <i class="fas fa-sign-in-alt"></i> Masuk ke Dashboard
+    </button>
+    <div class="login-error" id="login-error"></div>
+    <div class="login-badge">🔐 Admin & User Login tersedia</div>
+    <div style="margin-top:16px;font-size:12px;color:#718096;">
+      Admin: 082199990000 / Admin@gonab2024<br/>
+      User: 081234567890 / password123
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo">
+        <div class="sidebar-logo-icon">🛵</div>
+        <div class="sidebar-logo-text">
+          <h1>GONAB</h1>
+          <p>Nabire, Papua Tengah</p>
+        </div>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">Utama</div>
+      <div class="nav-item active" onclick="showPage('dashboard')">
+        <i class="fas fa-chart-line"></i> Dashboard
+      </div>
+      <div class="nav-item" onclick="showPage('orders')">
+        <i class="fas fa-receipt"></i> Semua Pesanan
+        <span class="nav-badge" id="pending-badge">0</span>
+      </div>
+
+      <div class="nav-section">Layanan</div>
+      <div class="nav-item" onclick="showPage('gooride')">
+        <i class="fas fa-motorcycle"></i> GooRide
+      </div>
+      <div class="nav-item" onclick="showPage('goocard')">
+        <i class="fas fa-car"></i> GooCard
+      </div>
+      <div class="nav-item" onclick="showPage('gookurir')">
+        <i class="fas fa-box"></i> GooKurir
+      </div>
+      <div class="nav-item" onclick="showPage('gooshop')">
+        <i class="fas fa-store"></i> GooShop
+      </div>
+      <div class="nav-item" onclick="showPage('goosewa')">
+        <i class="fas fa-box-open"></i> GooSewa
+      </div>
+
+      <div class="nav-section" id="admin-section">Manajemen</div>
+      <div class="nav-item" id="nav-drivers" onclick="showPage('drivers')">
+        <i class="fas fa-id-badge"></i> Data Driver
+      </div>
+      <div class="nav-item" id="nav-merchants" onclick="showPage('merchants')">
+        <i class="fas fa-shop"></i> Data Merchant
+      </div>
+      <div class="nav-item" id="nav-users" onclick="showPage('users')">
+        <i class="fas fa-users"></i> Pengguna
+      </div>
+      <div class="nav-item" id="nav-wallet" onclick="showPage('wallet')">
+        <i class="fas fa-wallet"></i> GooWallet
+      </div>
+      <div class="nav-item" id="nav-sos" onclick="showPage('sos')">
+        <i class="fas fa-exclamation-triangle"></i> SOS Darurat
+        <span class="nav-badge" id="sos-badge" style="display:none;background:var(--danger)">!</span>
+      </div>
+      <div class="nav-item" onclick="showPage('settings')">
+        <i class="fas fa-cog"></i> Pengaturan
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="admin-info">
+        <div class="admin-avatar" id="sidebar-avatar">A</div>
+        <div>
+          <div class="admin-name" id="sidebar-name">Admin</div>
+          <div class="admin-role" id="sidebar-role">Administrator</div>
+        </div>
+        <button class="logout-btn" onclick="doLogout()" title="Keluar"><i class="fas fa-sign-out-alt"></i></button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <div class="main-content">
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="topbar-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+        <div class="topbar-title" id="topbar-title">Dashboard</div>
+      </div>
+      <div class="topbar-right">
+        <div class="live-badge"><div class="live-dot"></div> LIVE</div>
+        <button class="topbar-btn" id="notif-btn" onclick="showPage('sos')">
+          <i class="fas fa-bell"></i>
+          <span class="notif-dot" id="notif-dot" style="display:none"></span>
+        </button>
+        <button class="topbar-btn" onclick="refreshCurrentPage()" title="Refresh"><i class="fas fa-sync-alt"></i></button>
+      </div>
+    </div>
+
+    <!-- Content Pages -->
+    <div class="content">
+
+      <!-- DASHBOARD PAGE -->
+      <div class="page active" id="page-dashboard">
+        <div class="page-header">
+          <h2>📊 Dashboard GONAB</h2>
+          <p>Selamat datang di Panel Admin GONAB – Platform Digital Kabupaten Nabire, Papua Tengah</p>
+        </div>
+
+        <div class="stats-grid" id="stats-grid">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+
+        <!-- Services Overview -->
+        <div class="card" style="margin-bottom:24px;">
+          <div class="card-header">
+            <span class="card-title">🚀 Layanan GONAB</span>
+            <span class="badge badge-success">6 Layanan Aktif</span>
+          </div>
+          <div class="card-body">
+            <div class="services-grid">
+              <div class="service-card" onclick="showPage('gooride')">
+                <div class="service-icon">🛵</div>
+                <div class="service-name">GooRide</div>
+                <div class="service-desc">Ojek Motor</div>
+              </div>
+              <div class="service-card" onclick="showPage('goocard')">
+                <div class="service-icon">🚗</div>
+                <div class="service-name">GooCard</div>
+                <div class="service-desc">Angkutan Mobil</div>
+              </div>
+              <div class="service-card" onclick="showPage('gookurir')">
+                <div class="service-icon">📦</div>
+                <div class="service-name">GooKurir</div>
+                <div class="service-desc">Antar Barang</div>
+              </div>
+              <div class="service-card" onclick="showPage('gooshop')">
+                <div class="service-icon">🏪</div>
+                <div class="service-name">GooShop</div>
+                <div class="service-desc">Belanja Toko</div>
+              </div>
+              <div class="service-card" onclick="showPage('goosewa')">
+                <div class="service-icon">🏕️</div>
+                <div class="service-name">GooSewa</div>
+                <div class="service-desc">Sewa Barang</div>
+              </div>
+              <div class="service-card">
+                <div class="service-icon">🚑</div>
+                <div class="service-name">GooAmbulance</div>
+                <div class="service-desc">Darurat Medis</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <!-- Real-time Map -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">🗺️ Peta Driver Real-time</span>
+              <span class="badge badge-success" id="online-count">0 Online</span>
+            </div>
+            <div class="card-body" style="padding:0;">
+              <div class="map-container" id="map-container">
+                <div class="driver-dots" id="driver-dots"></div>
+                <div class="map-overlay">
+                  <i class="fas fa-map-marked-alt"></i>
+                  <h3>Nabire, Papua Tengah</h3>
+                  <p>-3.3640°LS, 135.4960°BT</p>
+                  <p style="margin-top:8px;font-size:11px;opacity:0.5;">Integrasi Google Maps pada produksi</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recent Orders -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">📋 Pesanan Terbaru</span>
+              <button class="btn btn-outline btn-sm" onclick="showPage('orders')">Lihat Semua</button>
+            </div>
+            <div id="recent-orders-list" class="card-body" style="padding:0;">
+              <div class="loading"><div class="spinner"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header"><span class="card-title">📈 Distribusi Layanan</span></div>
+            <div class="card-body"><canvas id="serviceChart" height="200"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">💰 Pendapatan Platform</span></div>
+            <div class="card-body">
+              <canvas id="revenueChart" height="200"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ORDERS PAGE -->
+      <div class="page" id="page-orders">
+        <div class="page-header">
+          <h2>📋 Manajemen Pesanan</h2>
+          <p>Pantau dan kelola semua pesanan dari setiap layanan GONAB</p>
+        </div>
+        <div class="tabs">
+          <button class="tab-btn active" onclick="filterOrders('all', this)">Semua</button>
+          <button class="tab-btn" onclick="filterOrders('searching', this)">Mencari</button>
+          <button class="tab-btn" onclick="filterOrders('in_progress', this)">Berjalan</button>
+          <button class="tab-btn" onclick="filterOrders('completed', this)">Selesai</button>
+          <button class="tab-btn" onclick="filterOrders('cancelled', this)">Dibatalkan</button>
+        </div>
+        <div class="filter-bar">
+          <input type="text" id="order-search" placeholder="🔍 Cari pesanan..." oninput="filterOrdersSearch()"/>
+          <select id="order-service-filter" onchange="filterOrdersSearch()">
+            <option value="">Semua Layanan</option>
+            <option value="GooRide">GooRide</option>
+            <option value="GooCard">GooCard</option>
+            <option value="GooKurir">GooKurir</option>
+            <option value="GooShop">GooShop</option>
+            <option value="GooSewa">GooSewa</option>
+            <option value="GooAmbulance">GooAmbulance</option>
+          </select>
+        </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>No. Pesanan</th>
+                  <th>Pengguna</th>
+                  <th>Layanan</th>
+                  <th>Rute / Detail</th>
+                  <th>Total</th>
+                  <th>Pembayaran</th>
+                  <th>Status</th>
+                  <th>Waktu</th>
+                </tr>
+              </thead>
+              <tbody id="orders-table-body">
+                <tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-light)">Memuat data...</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div id="orders-pagination" class="pagination" style="padding:16px;"></div>
+        </div>
+      </div>
+
+      <!-- GOORIDE PAGE -->
+      <div class="page" id="page-gooride">
+        <div class="page-header">
+          <h2>🛵 GooRide – Ojek Motor</h2>
+          <p>Kelola layanan ojek motor di Kabupaten Nabire</p>
+        </div>
+        <div class="stats-grid" id="gooride-stats"></div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header"><span class="card-title">🚦 Tarif GooRide</span></div>
+            <div class="card-body">
+              <table>
+                <thead><tr><th>Komponen</th><th>Tarif</th></tr></thead>
+                <tbody>
+                  <tr><td>Tarif Dasar</td><td><strong>Rp 10.000</strong></td></tr>
+                  <tr><td>Per Kilometer</td><td><strong>Rp 3.000/km</strong></td></tr>
+                  <tr><td>Komisi Platform</td><td><strong>20%</strong></td></tr>
+                  <tr><td>Pendapatan Driver</td><td><strong>80%</strong></td></tr>
+                </tbody>
+              </table>
+              <button class="btn btn-primary" style="margin-top:16px;width:100%;" onclick="openTariffModal('GooRide')">
+                <i class="fas fa-edit"></i> Ubah Tarif
+              </button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">📊 Statistik GooRide</span></div>
+            <div class="card-body"><canvas id="goorideChart" height="200"></canvas></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">📋 Riwayat Pesanan GooRide</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>No. Pesanan</th><th>Pengguna</th><th>Driver</th><th>Rute</th><th>Jarak</th><th>Total</th><th>Status</th></tr></thead>
+              <tbody id="gooride-orders-body"><tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-light)">Memuat...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- GOOCARD PAGE -->
+      <div class="page" id="page-goocard">
+        <div class="page-header">
+          <h2>🚗 GooCard – Angkutan Mobil</h2>
+          <p>Layanan transportasi mobil penumpang di Nabire</p>
+        </div>
+        <div class="stats-grid" id="goocard-stats"></div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">🚦 Tarif GooCard</span></div>
+          <div class="card-body">
+            <table>
+              <thead><tr><th>Komponen</th><th>Tarif</th></tr></thead>
+              <tbody>
+                <tr><td>Tarif Dasar</td><td><strong>Rp 15.000</strong></td></tr>
+                <tr><td>Per Kilometer</td><td><strong>Rp 5.000/km</strong></td></tr>
+                <tr><td>Kapasitas</td><td><strong>4-7 Penumpang</strong></td></tr>
+              </tbody>
+            </table>
+            <button class="btn btn-primary" style="margin-top:16px;" onclick="openTariffModal('GooCard')"><i class="fas fa-edit"></i> Ubah Tarif</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- GOOKURIR PAGE -->
+      <div class="page" id="page-gookurir">
+        <div class="page-header">
+          <h2>📦 GooKurir – Pengiriman Barang</h2>
+          <p>Layanan antar jemput barang di Nabire</p>
+        </div>
+        <div class="stats-grid" id="gookurir-stats"></div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">🚦 Tarif GooKurir</span></div>
+          <div class="card-body">
+            <table>
+              <thead><tr><th>Komponen</th><th>Tarif</th></tr></thead>
+              <tbody>
+                <tr><td>Tarif Dasar</td><td><strong>Rp 8.000</strong></td></tr>
+                <tr><td>Per Kilometer</td><td><strong>Rp 2.500/km</strong></td></tr>
+                <tr><td>Berat Maksimal</td><td><strong>10 kg (motor)</strong></td></tr>
+              </tbody>
+            </table>
+            <button class="btn btn-primary" style="margin-top:16px;" onclick="openTariffModal('GooKurir')"><i class="fas fa-edit"></i> Ubah Tarif</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- GOOSHOP PAGE -->
+      <div class="page" id="page-gooshop">
+        <div class="page-header">
+          <h2>🏪 GooShop – Belanja Online</h2>
+          <p>Kelola toko dan produk merchant GONAB</p>
+        </div>
+        <div class="stats-grid" id="gooshop-stats"></div>
+        <div class="filter-bar">
+          <input type="text" id="shop-search" placeholder="🔍 Cari toko..." oninput="filterMerchantsSearch()"/>
+        </div>
+        <div class="profile-grid" id="merchants-grid">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+
+      <!-- GOOSEWA PAGE -->
+      <div class="page" id="page-goosewa">
+        <div class="page-header">
+          <h2>🏕️ GooSewa – Sewa Barang</h2>
+          <p>Tenda, alat musik, kamar kos, dan peralatan lainnya</p>
+        </div>
+        <div class="stats-grid" id="goosewa-stats"></div>
+        <div class="profile-grid" id="rentals-grid">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+
+      <!-- DRIVERS PAGE -->
+      <div class="page" id="page-drivers">
+        <div class="page-header">
+          <h2>🚗 Data Driver Mitra</h2>
+          <p>Verifikasi dan kelola semua driver terdaftar GONAB</p>
+        </div>
+        <div class="tabs">
+          <button class="tab-btn active" onclick="filterDrivers('all', this)">Semua Driver</button>
+          <button class="tab-btn" onclick="filterDrivers('pending', this)">Menunggu Verifikasi</button>
+          <button class="tab-btn" onclick="filterDrivers('verified', this)">Terverifikasi</button>
+          <button class="tab-btn" onclick="filterDrivers('online', this)">Online Sekarang</button>
+        </div>
+        <div class="filter-bar">
+          <input type="text" id="driver-search" placeholder="🔍 Cari driver..." oninput="filterDriversSearch()"/>
+        </div>
+        <div class="profile-grid" id="drivers-grid">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+
+      <!-- MERCHANTS PAGE -->
+      <div class="page" id="page-merchants">
+        <div class="page-header">
+          <h2>🏪 Data Merchant Mitra</h2>
+          <p>Verifikasi dan kelola toko-toko yang terdaftar di GONAB</p>
+        </div>
+        <div class="filter-bar">
+          <input type="text" id="merchant-search" placeholder="🔍 Cari merchant..." oninput="filterMerchantsPageSearch()"/>
+        </div>
+        <div class="profile-grid" id="merchants-page-grid">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+
+      <!-- USERS PAGE -->
+      <div class="page" id="page-users">
+        <div class="page-header">
+          <h2>👥 Data Pengguna</h2>
+          <p>Kelola semua akun pengguna terdaftar di GONAB</p>
+        </div>
+        <div class="filter-bar">
+          <input type="text" id="user-search" placeholder="🔍 Cari pengguna..." oninput="filterUsersSearch()"/>
+          <select id="user-role-filter" onchange="filterUsersSearch()">
+            <option value="">Semua Role</option>
+            <option value="customer">Customer</option>
+            <option value="driver">Driver</option>
+            <option value="merchant">Merchant</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Nama</th><th>No. HP</th><th>Email</th><th>Role</th><th>Saldo</th><th>Status</th><th>Bergabung</th><th>Aksi</th></tr>
+              </thead>
+              <tbody id="users-table-body">
+                <tr><td colspan="8" style="text-align:center;padding:20px;">Memuat...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- WALLET PAGE -->
+      <div class="page" id="page-wallet">
+        <div class="page-header">
+          <h2>💰 GooWallet – Dompet Digital</h2>
+          <p>Pantau transaksi keuangan platform GONAB</p>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-icon green"><i class="fas fa-wallet"></i></div><div><div class="stat-value" id="total-wallet">Rp 0</div><div class="stat-label">Total Saldo Beredar</div></div></div>
+          <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-arrow-up"></i></div><div><div class="stat-value">Rp 0</div><div class="stat-label">Total Top-up Hari Ini</div></div></div>
+          <div class="stat-card"><div class="stat-icon orange"><i class="fas fa-percentage"></i></div><div><div class="stat-value" id="platform-fee">Rp 0</div><div class="stat-label">Fee Platform Terkumpul</div></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">💳 Metode Pembayaran yang Didukung</span></div>
+          <div class="card-body">
+            <div style="display:flex;gap:12px;flex-wrap:wrap;">
+              <span class="badge badge-success"><i class="fas fa-money-bill"></i> Cash</span>
+              <span class="badge badge-info"><i class="fas fa-wallet"></i> GooWallet</span>
+              <span class="badge badge-gray"><i class="fas fa-university"></i> Transfer Bank</span>
+              <span class="badge badge-warning"><i class="fas fa-qrcode"></i> QRIS (Segera)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SOS PAGE -->
+      <div class="page" id="page-sos">
+        <div class="page-header">
+          <h2>🚨 Pusat Darurat SOS</h2>
+          <p>Monitor peringatan darurat dari pengguna GONAB</p>
+        </div>
+        <div id="sos-alerts-container">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+
+      <!-- SETTINGS PAGE -->
+      <div class="page" id="page-settings">
+        <div class="page-header">
+          <h2>⚙️ Pengaturan Sistem</h2>
+          <p>Konfigurasi platform GONAB Kabupaten Nabire</p>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header"><span class="card-title">📱 Informasi Aplikasi</span></div>
+            <div class="card-body">
+              <table>
+                <tbody>
+                  <tr><td style="color:var(--text-light);width:150px;">Nama Aplikasi</td><td><strong>GONAB</strong></td></tr>
+                  <tr><td style="color:var(--text-light)">Versi</td><td><strong>1.0.0</strong></td></tr>
+                  <tr><td style="color:var(--text-light)">Wilayah</td><td><strong>Kab. Nabire, Papua Tengah</strong></td></tr>
+                  <tr><td style="color:var(--text-light)">Backend</td><td><strong>Node.js + Express</strong></td></tr>
+                  <tr><td style="color:var(--text-light)">Database</td><td><strong>PostgreSQL (PostGIS)</strong></td></tr>
+                  <tr><td style="color:var(--text-light)">Real-time</td><td><strong>Socket.io</strong></td></tr>
+                  <tr><td style="color:var(--text-light)">Frontend</td><td><strong>Flutter (Prod)</strong></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">💡 Tarif Semua Layanan</span></div>
+            <div class="card-body">
+              <table>
+                <thead><tr><th>Layanan</th><th>Dasar</th><th>Per KM</th></tr></thead>
+                <tbody>
+                  <tr><td>🛵 GooRide</td><td>Rp 10.000</td><td>Rp 3.000</td></tr>
+                  <tr><td>🚗 GooCard</td><td>Rp 15.000</td><td>Rp 5.000</td></tr>
+                  <tr><td>📦 GooKurir</td><td>Rp 8.000</td><td>Rp 2.500</td></tr>
+                  <tr><td>🚑 GooAmbulance</td><td>Rp 25.000</td><td>Rp 4.000</td></tr>
+                </tbody>
+              </table>
+              <button class="btn btn-primary" style="margin-top:14px;" onclick="openTariffModal('GooRide')">
+                <i class="fas fa-edit"></i> Ubah Tarif
+              </button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">🗺️ Konfigurasi Maps</span></div>
+            <div class="card-body">
+              <div class="form-group">
+                <label>Google Maps API Key</label>
+                <input type="text" class="form-control" placeholder="Masukkan Google Maps API Key..." />
+              </div>
+              <div class="form-group">
+                <label>Radius Pencarian Driver Default</label>
+                <input type="number" class="form-control" value="5" min="1" max="20"/> 
+                <small style="color:var(--text-light);font-size:11px;">dalam kilometer</small>
+              </div>
+              <button class="btn btn-primary"><i class="fas fa-save"></i> Simpan Pengaturan</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">🔔 Notifikasi & Kontak Darurat</span></div>
+            <div class="card-body">
+              <div class="form-group">
+                <label>No. HP Admin untuk SOS</label>
+                <input type="text" class="form-control" value="082199990000"/>
+              </div>
+              <div class="form-group">
+                <label>WhatsApp Notifikasi</label>
+                <input type="text" class="form-control" value="082199990000"/>
+              </div>
+              <div class="form-group">
+                <label>Email Admin</label>
+                <input type="email" class="form-control" value="admin@gonab.id"/>
+              </div>
+              <button class="btn btn-primary"><i class="fas fa-save"></i> Simpan</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main-content -->
+</div><!-- /app -->
+
+<!-- Tariff Modal -->
+<div class="modal-overlay" id="tariff-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>✏️ Ubah Tarif Layanan</h3>
+      <button class="modal-close" onclick="closeModal('tariff-modal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Layanan</label>
+        <input type="text" class="form-control" id="tariff-service" readonly/>
+      </div>
+      <div class="form-group">
+        <label>Tarif Dasar (Rp)</label>
+        <input type="number" class="form-control" id="tariff-base"/>
+      </div>
+      <div class="form-group">
+        <label>Tarif Per Kilometer (Rp)</label>
+        <input type="number" class="form-control" id="tariff-perkm"/>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('tariff-modal')">Batal</button>
+      <button class="btn btn-primary" onclick="saveTariff()"><i class="fas fa-save"></i> Simpan</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let authToken = localStorage.getItem('gonab_token');
+let currentUser = null;
+let allOrders = [], allDrivers = [], allMerchants = [], allUsers = [], allRentals = [];
+let currentOrderFilter = 'all';
+let serviceChart = null, revenueChart = null, goorideChart = null;
+
+// ===== TOAST =====
+function showToast(message, type='success') {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  const icons = {success:'✅', error:'❌', warning:'⚠️', info:'ℹ️'};
+  toast.innerHTML = `<span style="font-size:16px;">${icons[type]||'✅'}</span> ${message}`;
+  container.appendChild(toast);
+  setTimeout(() => { toast.style.opacity='0'; toast.style.transform='translateX(100%)'; toast.style.transition='all 0.3s'; setTimeout(()=>toast.remove(),300); }, 3500);
+}
+
+// ===== AUTH =====
+async function doLogin() {
+  const phone = document.getElementById('login-phone').value.trim();
+  const password = document.getElementById('login-password').value.trim();
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  try {
+    const res = await fetch(`${API}/api/auth/login`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ phone, password })
+    });
+    const data = await res.json();
+    if (!data.success) { errEl.textContent = data.message; errEl.style.display = 'block'; return; }
+    authToken = data.data.token;
+    currentUser = data.data.user;
+    localStorage.setItem('gonab_token', authToken);
+    document.getElementById('login-page').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    initApp();
+    showToast(`Selamat datang, ${currentUser.name}! 🎉`);
+  } catch(e) { errEl.textContent = 'Gagal terhubung ke server.'; errEl.style.display = 'block'; }
+}
+
+function doLogout() {
+  localStorage.removeItem('gonab_token');
+  authToken = null; currentUser = null;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-page').style.display = 'flex';
+  showToast('Berhasil keluar. Sampai jumpa!', 'info');
+}
+
+// ===== API FETCH =====
+async function apiFetch(endpoint, options={}) {
+  const headers = { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...options.headers };
+  const res = await fetch(`${API}${endpoint}`, { ...options, headers });
+  return res.json();
+}
+
+// ===== INIT =====
+async function initApp() {
+  // Set user info
+  document.getElementById('sidebar-name').textContent = currentUser?.name || 'Admin';
+  document.getElementById('sidebar-role').textContent = currentUser?.role === 'admin' ? 'Administrator' : currentUser?.role || 'User';
+  document.getElementById('sidebar-avatar').textContent = (currentUser?.name || 'A')[0].toUpperCase();
+  
+  // Show/hide admin menu
+  const isAdmin = currentUser?.role === 'admin';
+  const adminItems = ['nav-drivers', 'nav-merchants', 'nav-users', 'nav-wallet', 'nav-sos', 'admin-section'];
+  adminItems.forEach(id => { const el = document.getElementById(id); if(el) el.style.display = isAdmin ? '' : 'none'; });
+
+  await loadDashboard();
+  initSocket();
+}
+
+async function loadDashboard() {
+  try {
+    const data = await apiFetch('/api/admin/dashboard');
+    if (!data.success) return;
+    const s = data.data.stats;
+
+    // Stats
+    document.getElementById('stats-grid').innerHTML = `
+      <div class="stat-card"><div class="stat-icon green"><i class="fas fa-users"></i></div><div><div class="stat-value">${s.total_users}</div><div class="stat-label">Total Pengguna</div></div></div>
+      <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-id-badge"></i></div><div><div class="stat-value">${s.total_drivers}</div><div class="stat-label">Driver Terdaftar</div><div class="stat-change up">✓ ${s.verified_drivers} Terverifikasi · ${s.online_drivers} Online</div></div></div>
+      <div class="stat-card"><div class="stat-icon orange"><i class="fas fa-store"></i></div><div><div class="stat-value">${s.total_merchants}</div><div class="stat-label">Merchant Aktif</div><div class="stat-change up">✓ ${s.verified_merchants} Terverifikasi</div></div></div>
+      <div class="stat-card"><div class="stat-icon yellow"><i class="fas fa-receipt"></i></div><div><div class="stat-value">${s.total_orders}</div><div class="stat-label">Total Pesanan</div><div class="stat-change up">✓ ${s.completed_orders} Selesai</div></div></div>
+      <div class="stat-card"><div class="stat-icon green"><i class="fas fa-coins"></i></div><div><div class="stat-value">Rp ${s.total_revenue.toLocaleString('id-ID')}</div><div class="stat-label">Total Revenue</div><div class="stat-change up">Fee: Rp ${s.platform_fee.toLocaleString('id-ID')}</div></div></div>
+      <div class="stat-card"><div class="stat-icon purple"><i class="fas fa-calendar-day"></i></div><div><div class="stat-value">${s.today_orders}</div><div class="stat-label">Pesanan Hari Ini</div><div class="stat-change up">Rp ${s.today_revenue.toLocaleString('id-ID')}</div></div></div>
+    `;
+
+    // Pending badge
+    document.getElementById('pending-badge').textContent = s.pending_orders;
+
+    // Online drivers count
+    document.getElementById('online-count').textContent = `${s.online_drivers} Online`;
+
+    // Driver dots on map
+    renderDriverDots();
+
+    // Recent orders
+    renderRecentOrders(data.data.recent_orders);
+
+    // Wallet stats
+    document.getElementById('total-wallet').textContent = `Rp ${(s.total_revenue).toLocaleString('id-ID')}`;
+    document.getElementById('platform-fee').textContent = `Rp ${s.platform_fee.toLocaleString('id-ID')}`;
+
+    // Charts
+    renderServiceChart(data.data.service_breakdown);
+    renderRevenueChart();
+  } catch(e) { console.error('Dashboard error:', e); }
+}
+
+function renderDriverDots() {
+  const container = document.getElementById('driver-dots');
+  if (!container) return;
+  container.innerHTML = '';
+  const positions = [
+    { top: '30%', left: '40%' }, { top: '55%', left: '60%' }, { top: '70%', left: '35%' },
+    { top: '25%', left: '70%' }, { top: '45%', left: '20%' }
+  ];
+  positions.forEach((pos, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'driver-dot';
+    dot.style.cssText = `top:${pos.top};left:${pos.left};animation-delay:${i*0.4}s;`;
+    dot.title = `Driver #${i+1}`;
+    container.appendChild(dot);
+  });
+}
+
+function renderRecentOrders(orders) {
+  const container = document.getElementById('recent-orders-list');
+  if (!orders || !orders.length) {
+    container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-light)">Belum ada pesanan</div>';
+    return;
+  }
+  const serviceIcons = { GooRide:'🛵', GooCard:'🚗', GooKurir:'📦', GooShop:'🏪', GooSewa:'🏕️', GooAmbulance:'🚑' };
+  container.innerHTML = orders.slice(0,8).map(o => `
+    <div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;">
+      <span style="font-size:22px;">${serviceIcons[o.service_type]||'📋'}</span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:600;">${o.order_number}</div>
+        <div style="font-size:11px;color:var(--text-light);">${o.user_name||'Pengguna'} · ${new Date(o.created_at).toLocaleString('id-ID',{dateStyle:'short',timeStyle:'short'})}</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:13px;font-weight:700;color:var(--primary);">Rp ${(o.total_amount||0).toLocaleString('id-ID')}</div>
+        <span class="badge ${getStatusBadge(o.status)}" style="font-size:10px;">${formatStatus(o.status)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderServiceChart(breakdown) {
+  const ctx = document.getElementById('serviceChart');
+  if (!ctx) return;
+  if (serviceChart) serviceChart.destroy();
+  const labels = Object.keys(breakdown);
+  const values = Object.values(breakdown);
+  const colors = ['#00b14f','#ff6b35','#3182ce','#805ad5','#d69e2e','#e53e3e'];
+  serviceChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: values, backgroundColor: colors.slice(0,labels.length), borderWidth: 0 }] },
+    options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { padding: 16, font: { size: 12 } } } } }
+  });
+}
+
+function renderRevenueChart() {
+  const ctx = document.getElementById('revenueChart');
+  if (!ctx) return;
+  if (revenueChart) revenueChart.destroy();
+  const months = ['Jan','Feb','Mar','Apr','Mei','Jun','Jul'];
+  const data = [85000, 120000, 95000, 180000, 165000, 210000, 195000];
+  revenueChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: months,
+      datasets: [{ label: 'Revenue (Rp)', data, backgroundColor: '#00b14f', borderRadius: 6 }]
+    },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+}
+
+// ===== PAGES =====
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const page = document.getElementById(`page-${name}`);
+  if (page) page.classList.add('active');
+  const navItem = Array.from(document.querySelectorAll('.nav-item')).find(n => n.getAttribute('onclick')?.includes(`'${name}'`));
+  if (navItem) navItem.classList.add('active');
+  const titles = { dashboard:'Dashboard', orders:'Semua Pesanan', gooride:'GooRide', goocard:'GooCard', gookurir:'GooKurir', gooshop:'GooShop', goosewa:'GooSewa', drivers:'Data Driver', merchants:'Data Merchant', users:'Pengguna', wallet:'GooWallet', sos:'SOS Darurat', settings:'Pengaturan' };
+  document.getElementById('topbar-title').textContent = titles[name] || name;
+
+  // Load data for page
+  const loaders = {
+    dashboard: loadDashboard,
+    orders: loadOrders,
+    gooride: () => loadServicePage('GooRide'),
+    goocard: () => loadServicePage('GooCard'),
+    gookurir: () => loadServicePage('GooKurir'),
+    gooshop: loadShop,
+    goosewa: loadRentals,
+    drivers: loadDrivers,
+    merchants: loadMerchantsPage,
+    users: loadUsers,
+    sos: loadSOS,
+  };
+  if (loaders[name]) loaders[name]();
+}
+
+function refreshCurrentPage() {
+  const activePage = document.querySelector('.page.active');
+  if (activePage) {
+    const name = activePage.id.replace('page-', '');
+    showPage(name);
+    showToast('Data diperbarui', 'info');
+  }
+}
+
+// ===== ORDERS =====
+async function loadOrders() {
+  try {
+    const data = await apiFetch('/api/admin/orders?limit=100');
+    if (data.success) { allOrders = data.data.orders; renderOrdersTable(allOrders); }
+  } catch(e) { console.error(e); }
+}
+
+function renderOrdersTable(orders) {
+  const serviceIcons = { GooRide:'🛵', GooCard:'🚗', GooKurir:'📦', GooShop:'🏪', GooSewa:'🏕️', GooAmbulance:'🚑' };
+  const tbody = document.getElementById('orders-table-body');
+  if (!orders.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-light)">Tidak ada pesanan ditemukan</td></tr>'; return; }
+  tbody.innerHTML = orders.map(o => `
+    <tr>
+      <td><span style="font-weight:600;font-size:12px;">${o.order_number}</span></td>
+      <td>${o.user_name||'—'}</td>
+      <td><span style="font-size:16px;">${serviceIcons[o.service_type]||'📋'}</span> ${o.service_type}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;">
+        ${o.pickup_address ? `📍${o.pickup_address.substring(0,30)}...` : o.rental_name || '—'}
+      </td>
+      <td style="font-weight:700;color:var(--primary);">Rp ${(o.total_amount||0).toLocaleString('id-ID')}</td>
+      <td><span class="badge badge-gray">${o.payment_method==='wallet'?'💳 Wallet':'💵 Cash'}</span></td>
+      <td><span class="badge ${getStatusBadge(o.status)}">${formatStatus(o.status)}</span></td>
+      <td style="font-size:11px;color:var(--text-light);">${new Date(o.created_at).toLocaleString('id-ID',{dateStyle:'short',timeStyle:'short'})}</td>
+    </tr>
+  `).join('');
+}
+
+function filterOrders(status, btn) {
+  document.querySelectorAll('#page-orders .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentOrderFilter = status;
+  let filtered = status === 'all' ? allOrders : allOrders.filter(o => o.status === status);
+  renderOrdersTable(filtered);
+}
+
+function filterOrdersSearch() {
+  const search = document.getElementById('order-search').value.toLowerCase();
+  const service = document.getElementById('order-service-filter').value;
+  let filtered = allOrders;
+  if (currentOrderFilter !== 'all') filtered = filtered.filter(o => o.status === currentOrderFilter);
+  if (search) filtered = filtered.filter(o => o.order_number?.toLowerCase().includes(search) || o.user_name?.toLowerCase().includes(search));
+  if (service) filtered = filtered.filter(o => o.service_type === service);
+  renderOrdersTable(filtered);
+}
+
+// ===== SERVICE PAGES =====
+async function loadServicePage(serviceType) {
+  const icons = { GooRide:'🛵', GooCard:'🚗', GooKurir:'📦' };
+  const statsIds = { GooRide:'gooride-stats', GooCard:'goocard-stats', GooKurir:'gookurir-stats' };
+  const bodyIds = { GooRide:'gooride-orders-body' };
+  try {
+    const data = await apiFetch(`/api/admin/orders?service_type=${serviceType}&limit=100`);
+    if (!data.success) return;
+    const orders = data.data.orders;
+    const total = orders.length;
+    const completed = orders.filter(o => o.status === 'completed').length;
+    const revenue = orders.filter(o => o.status === 'completed').reduce((s,o) => s+o.total_amount, 0);
+
+    const statsId = statsIds[serviceType];
+    if (statsId) document.getElementById(statsId).innerHTML = `
+      <div class="stat-card"><div class="stat-icon green"><i class="fas fa-list"></i></div><div><div class="stat-value">${total}</div><div class="stat-label">Total Pesanan</div></div></div>
+      <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-check-circle"></i></div><div><div class="stat-value">${completed}</div><div class="stat-label">Selesai</div></div></div>
+      <div class="stat-card"><div class="stat-icon yellow"><i class="fas fa-coins"></i></div><div><div class="stat-value">Rp ${revenue.toLocaleString('id-ID')}</div><div class="stat-label">Revenue</div></div></div>
+    `;
+
+    if (bodyIds[serviceType]) {
+      const tbody = document.getElementById(bodyIds[serviceType]);
+      if (tbody) {
+        if (!orders.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-light)">Belum ada pesanan</td></tr>'; return; }
+        tbody.innerHTML = orders.map(o => `
+          <tr>
+            <td style="font-size:12px;font-weight:600;">${o.order_number}</td>
+            <td>${o.user_name||'—'}</td>
+            <td>${o.driver_name||'—'}</td>
+            <td style="font-size:12px;">${o.pickup_address?.substring(0,25)||'—'}…</td>
+            <td>${o.distance_km||'—'} km</td>
+            <td style="font-weight:700;color:var(--primary);">Rp ${(o.total_amount||0).toLocaleString('id-ID')}</td>
+            <td><span class="badge ${getStatusBadge(o.status)}">${formatStatus(o.status)}</span></td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    // GooRide chart
+    if (serviceType === 'GooRide') {
+      const ctx = document.getElementById('goorideChart');
+      if (ctx) {
+        if (goorideChart) goorideChart.destroy();
+        const statusCounts = { 'Mencari':0, 'Diterima':0, 'Berjalan':0, 'Selesai':0, 'Dibatalkan':0 };
+        orders.forEach(o => {
+          if(o.status==='searching') statusCounts['Mencari']++;
+          else if(o.status==='accepted') statusCounts['Diterima']++;
+          else if(['on_the_way','in_progress'].includes(o.status)) statusCounts['Berjalan']++;
+          else if(o.status==='completed') statusCounts['Selesai']++;
+          else if(o.status==='cancelled') statusCounts['Dibatalkan']++;
+        });
+        goorideChart = new Chart(ctx, {
+          type: 'pie',
+          data: { labels: Object.keys(statusCounts), datasets: [{ data: Object.values(statusCounts), backgroundColor: ['#d69e2e','#3182ce','#805ad5','#00b14f','#e53e3e'], borderWidth: 0 }] },
+          options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+        });
+      }
+    }
+  } catch(e) { console.error(e); }
+}
+
+// ===== DRIVERS =====
+async function loadDrivers() {
+  try {
+    const data = await apiFetch('/api/admin/drivers?limit=100');
+    if (data.success) { allDrivers = data.data.drivers; renderDriversGrid(allDrivers); }
+  } catch(e) { console.error(e); }
+}
+
+function renderDriversGrid(drivers) {
+  const container = document.getElementById('drivers-grid');
+  if (!drivers.length) { container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light)">Tidak ada driver ditemukan</div>'; return; }
+  container.innerHTML = drivers.map(d => `
+    <div class="profile-card">
+      <div class="profile-card-header">
+        <div class="avatar">${(d.user_name||'D')[0].toUpperCase()}</div>
+        <div>
+          <div class="profile-card-name">${d.user_name||'Driver'}</div>
+          <div class="profile-card-sub">${d.user_phone||'—'}</div>
+        </div>
+        <div style="margin-left:auto;">
+          ${d.is_online ? '<span class="badge badge-success">🟢 Online</span>' : '<span class="badge badge-gray">⚫ Offline</span>'}
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text-light);margin-bottom:12px;">
+        <div>🚗 ${d.vehicle_type==='motor'?'Motor':'Mobil'}: ${d.vehicle_plate}</div>
+        <div>📋 ${d.vehicle_model||'—'} · ${d.vehicle_color||'—'}</div>
+        <div>⭐ Rating: ${d.rating||0} · ✅ ${d.total_trips||0} trip</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        ${d.is_verified ?
+          '<span class="badge badge-success"><i class="fas fa-check-circle"></i> Terverifikasi</span>' :
+          `<button class="btn btn-primary btn-sm" onclick="verifyDriver('${d.id}','approve')"><i class="fas fa-check"></i> Verifikasi</button>
+           <button class="btn btn-danger btn-sm" onclick="verifyDriver('${d.id}','reject')"><i class="fas fa-times"></i> Tolak</button>`
+        }
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterDrivers(filter, btn) {
+  document.querySelectorAll('#page-drivers .tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  let filtered = allDrivers;
+  if (filter === 'pending') filtered = allDrivers.filter(d => !d.is_verified);
+  else if (filter === 'verified') filtered = allDrivers.filter(d => d.is_verified);
+  else if (filter === 'online') filtered = allDrivers.filter(d => d.is_online);
+  renderDriversGrid(filtered);
+}
+
+function filterDriversSearch() {
+  const search = document.getElementById('driver-search').value.toLowerCase();
+  const filtered = allDrivers.filter(d => d.user_name?.toLowerCase().includes(search) || d.vehicle_plate?.toLowerCase().includes(search) || d.user_phone?.includes(search));
+  renderDriversGrid(filtered);
+}
+
+async function verifyDriver(driverId, action) {
+  try {
+    const data = await apiFetch(`/api/admin/drivers/${driverId}/verify`, { method: 'PUT', body: JSON.stringify({ action }) });
+    if (data.success) { showToast(data.message); loadDrivers(); }
+    else showToast(data.message, 'error');
+  } catch(e) { showToast('Gagal memperbarui', 'error'); }
+}
+
+// ===== MERCHANTS =====
+async function loadShop() {
+  try {
+    const data = await apiFetch('/api/merchants?limit=100');
+    if (data.success) {
+      allMerchants = data.data.merchants;
+      const statsEl = document.getElementById('gooshop-stats');
+      statsEl.innerHTML = `
+        <div class="stat-card"><div class="stat-icon green"><i class="fas fa-store"></i></div><div><div class="stat-value">${allMerchants.length}</div><div class="stat-label">Toko Terdaftar</div></div></div>
+        <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-door-open"></i></div><div><div class="stat-value">${allMerchants.filter(m=>m.is_open).length}</div><div class="stat-label">Sedang Buka</div></div></div>
+        <div class="stat-card"><div class="stat-icon yellow"><i class="fas fa-star"></i></div><div><div class="stat-value">${allMerchants.length ? (allMerchants.reduce((s,m)=>s+m.rating,0)/allMerchants.length).toFixed(1) : 0}</div><div class="stat-label">Rating Rata-rata</div></div></div>
+      `;
+      renderMerchantsGrid(allMerchants, 'merchants-grid');
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function loadMerchantsPage() {
+  try {
+    const data = await apiFetch('/api/admin/merchants?limit=100');
+    if (data.success) { allMerchants = data.data.merchants; renderMerchantsPageGrid(allMerchants); }
+  } catch(e) { console.error(e); }
+}
+
+function renderMerchantsGrid(merchants, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  if (!merchants.length) { container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light)">Tidak ada toko ditemukan</div>'; return; }
+  container.innerHTML = merchants.map(m => `
+    <div class="profile-card">
+      <div class="profile-card-header">
+        <div class="avatar" style="background:${m.is_open?'#e6f9ee':'#f0f4f8'};color:${m.is_open?'var(--primary)':'var(--text-light)'};font-size:22px;">🏪</div>
+        <div>
+          <div class="profile-card-name">${m.store_name}</div>
+          <div class="profile-card-sub">${m.store_category}</div>
+        </div>
+        <div style="margin-left:auto;">${m.is_open ? '<span class="badge badge-success">Buka</span>' : '<span class="badge badge-gray">Tutup</span>'}</div>
+      </div>
+      <div style="font-size:12px;color:var(--text-light);margin-bottom:8px;">
+        <div>📍 ${m.store_address}</div>
+        <div>⏰ ${m.operating_hours||'—'} · ⭐ ${m.rating||0} · 📦 ${m.total_orders||0} pesanan</div>
+      </div>
+      <span class="${m.is_verified?'badge badge-success':'badge badge-warning'}">${m.is_verified?'✓ Terverifikasi':'⏳ Menunggu'}</span>
+    </div>
+  `).join('');
+}
+
+function renderMerchantsPageGrid(merchants) {
+  const container = document.getElementById('merchants-page-grid');
+  if (!container) return;
+  if (!merchants.length) { container.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-light)">Tidak ada merchant</div>'; return; }
+  container.innerHTML = merchants.map(m => `
+    <div class="profile-card">
+      <div class="profile-card-header">
+        <div class="avatar" style="font-size:22px;">🏪</div>
+        <div>
+          <div class="profile-card-name">${m.store_name}</div>
+          <div class="profile-card-sub">${m.owner_name||'—'} · ${m.owner_phone||'—'}</div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text-light);margin-bottom:10px;">
+        <div>📁 ${m.store_category}</div>
+        <div>📍 ${m.store_address}</div>
+        <div>⭐ ${m.rating||0} · 📦 ${m.total_orders||0} pesanan</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${m.is_verified ?
+          '<span class="badge badge-success"><i class="fas fa-check-circle"></i> Terverifikasi</span>' :
+          `<button class="btn btn-primary btn-sm" onclick="verifyMerchant('${m.id}','approve')"><i class="fas fa-check"></i> Verifikasi</button>
+           <button class="btn btn-danger btn-sm" onclick="verifyMerchant('${m.id}','reject')"><i class="fas fa-times"></i> Tolak</button>`
+        }
+        ${m.is_open ? '<span class="badge badge-success">🟢 Buka</span>' : '<span class="badge badge-gray">🔴 Tutup</span>'}
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterMerchantsSearch() {
+  const search = document.getElementById('shop-search')?.value.toLowerCase() || '';
+  renderMerchantsGrid(allMerchants.filter(m => m.store_name.toLowerCase().includes(search)), 'merchants-grid');
+}
+
+function filterMerchantsPageSearch() {
+  const search = document.getElementById('merchant-search')?.value.toLowerCase() || '';
+  renderMerchantsPageGrid(allMerchants.filter(m => m.store_name.toLowerCase().includes(search) || m.owner_name?.toLowerCase().includes(search)));
+}
+
+async function verifyMerchant(merchantId, action) {
+  try {
+    const data = await apiFetch(`/api/admin/merchants/${merchantId}/verify`, { method: 'PUT', body: JSON.stringify({ action }) });
+    if (data.success) { showToast(data.message); loadMerchantsPage(); }
+    else showToast(data.message, 'error');
+  } catch(e) { showToast('Gagal memperbarui', 'error'); }
+}
+
+// ===== RENTALS =====
+async function loadRentals() {
+  try {
+    const data = await apiFetch('/api/rentals');
+    if (data.success) {
+      allRentals = data.data.rentals;
+      const statsEl = document.getElementById('goosewa-stats');
+      statsEl.innerHTML = `
+        <div class="stat-card"><div class="stat-icon green"><i class="fas fa-box-open"></i></div><div><div class="stat-value">${allRentals.length}</div><div class="stat-label">Item Tersedia</div></div></div>
+        <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-clipboard-check"></i></div><div><div class="stat-value">${allRentals.reduce((s,r)=>s+r.available_stock,0)}</div><div class="stat-label">Total Stok Tersedia</div></div></div>
+        <div class="stat-card"><div class="stat-icon yellow"><i class="fas fa-star"></i></div><div><div class="stat-value">${allRentals.length ? (allRentals.reduce((s,r)=>s+r.rating,0)/allRentals.length).toFixed(1) : 0}</div><div class="stat-label">Rating Rata-rata</div></div></div>
+      `;
+      const container = document.getElementById('rentals-grid');
+      container.innerHTML = allRentals.map(r => `
+        <div class="profile-card">
+          <div class="profile-card-header">
+            <div class="avatar" style="font-size:22px;">${r.category==='Tenda & Event'?'⛺':r.category==='Alat Musik'?'🎸':r.category==='Kos & Penginapan'?'🏡':'🔧'}</div>
+            <div>
+              <div class="profile-card-name">${r.name}</div>
+              <div class="profile-card-sub">${r.category}</div>
+            </div>
+            <div style="margin-left:auto;"><span class="badge ${r.available_stock>0?'badge-success':'badge-danger'}">${r.available_stock>0?'Tersedia':'Habis'}</span></div>
+          </div>
+          <div style="font-size:12px;color:var(--text-light);margin-bottom:10px;">
+            <div>📍 ${r.location||'—'}</div>
+            <div>💰 Rp ${r.price_per_day.toLocaleString('id-ID')}/hari</div>
+            ${r.price_per_week ? `<div>📅 Rp ${r.price_per_week.toLocaleString('id-ID')}/minggu</div>` : ''}
+            ${r.price_per_month ? `<div>🗓️ Rp ${r.price_per_month.toLocaleString('id-ID')}/bulan</div>` : ''}
+            <div>📦 Stok: ${r.available_stock}/${r.stock} · 💰 Deposit: Rp ${r.deposit.toLocaleString('id-ID')}</div>
+          </div>
+          <span class="badge badge-info">⭐ ${r.rating||0}</span>
+        </div>
+      `).join('');
+    }
+  } catch(e) { console.error(e); }
+}
+
+// ===== USERS =====
+async function loadUsers() {
+  try {
+    const data = await apiFetch('/api/admin/users?limit=100');
+    if (data.success) { allUsers = data.data.users; renderUsersTable(allUsers); }
+  } catch(e) { console.error(e); }
+}
+
+function renderUsersTable(users) {
+  const tbody = document.getElementById('users-table-body');
+  if (!users.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;">Tidak ada pengguna</td></tr>'; return; }
+  const roleBadge = { admin: 'badge-danger', driver: 'badge-info', merchant: 'badge-warning', customer: 'badge-success' };
+  tbody.innerHTML = users.map(u => `
+    <tr>
+      <td style="font-weight:600;">${u.name}</td>
+      <td>${u.phone}</td>
+      <td style="font-size:12px;color:var(--text-light);">${u.email||'—'}</td>
+      <td><span class="badge ${roleBadge[u.role]||'badge-gray'}">${u.role}</span></td>
+      <td style="font-weight:700;">Rp ${(u.wallet_balance||0).toLocaleString('id-ID')}</td>
+      <td><span class="badge ${u.is_active?'badge-success':'badge-danger'}">${u.is_active?'Aktif':'Nonaktif'}</span></td>
+      <td style="font-size:11px;color:var(--text-light);">${new Date(u.created_at).toLocaleDateString('id-ID')}</td>
+      <td>
+        ${u.role !== 'admin' ? `<button class="btn ${u.is_active?'btn-danger':'btn-primary'} btn-sm" onclick="toggleUser('${u.id}')">
+          <i class="fas fa-${u.is_active?'ban':'check'}"></i> ${u.is_active?'Nonaktifkan':'Aktifkan'}
+        </button>` : '<span class="badge badge-gray">Admin</span>'}
+      </td>
+    </tr>
+  `).join('');
+}
+
+function filterUsersSearch() {
+  const search = document.getElementById('user-search').value.toLowerCase();
+  const role = document.getElementById('user-role-filter').value;
+  let filtered = allUsers;
+  if (search) filtered = filtered.filter(u => u.name.toLowerCase().includes(search) || u.phone.includes(search));
+  if (role) filtered = filtered.filter(u => u.role === role);
+  renderUsersTable(filtered);
+}
+
+async function toggleUser(userId) {
+  try {
+    const data = await apiFetch(`/api/admin/users/${userId}/toggle`, { method: 'PUT' });
+    if (data.success) { showToast(data.message); loadUsers(); }
+    else showToast(data.message, 'error');
+  } catch(e) { showToast('Gagal', 'error'); }
+}
+
+// ===== SOS =====
+async function loadSOS() {
+  try {
+    const data = await apiFetch('/api/admin/sos');
+    const container = document.getElementById('sos-alerts-container');
+    if (!data.success) { container.innerHTML = '<div style="text-align:center;padding:30px;">Gagal memuat data</div>'; return; }
+    const alerts = data.data.alerts;
+    if (!alerts.length) {
+      container.innerHTML = `
+        <div style="text-align:center;padding:60px;color:var(--text-light);">
+          <div style="font-size:60px;margin-bottom:16px;">✅</div>
+          <h3>Tidak Ada Peringatan SOS</h3>
+          <p>Semua pengguna aman. Sistem pemantauan aktif 24/7.</p>
+        </div>`;
+      document.getElementById('sos-badge').style.display = 'none';
+      document.getElementById('notif-dot').style.display = 'none';
+      return;
+    }
+    document.getElementById('sos-badge').style.display = '';
+    document.getElementById('notif-dot').style.display = '';
+    container.innerHTML = alerts.map(a => `
+      <div class="alert alert-sos">
+        <i class="fas fa-exclamation-triangle" style="font-size:24px;flex-shrink:0;"></i>
+        <div>
+          <strong>🚨 SOS DARURAT!</strong><br/>
+          Pengguna: <strong>${a.user_name||'—'}</strong> (${a.user_phone||'—'})<br/>
+          No. Pesanan: <strong>${a.order_number}</strong><br/>
+          Waktu: ${new Date(a.sos_at||a.created_at).toLocaleString('id-ID')}<br/>
+          <button class="btn btn-danger btn-sm" style="margin-top:8px;"><i class="fas fa-phone"></i> Hubungi Sekarang</button>
+        </div>
+      </div>
+    `).join('');
+  } catch(e) { console.error(e); }
+}
+
+// ===== TARIFF MODAL =====
+const defaultTariffs = {
+  GooRide: { base: 10000, perKm: 3000 },
+  GooCard: { base: 15000, perKm: 5000 },
+  GooKurir: { base: 8000, perKm: 2500 },
+  GooAmbulance: { base: 25000, perKm: 4000 }
+};
+
+function openTariffModal(service) {
+  document.getElementById('tariff-service').value = service;
+  document.getElementById('tariff-base').value = defaultTariffs[service]?.base || 10000;
+  document.getElementById('tariff-perkm').value = defaultTariffs[service]?.perKm || 3000;
+  document.getElementById('tariff-modal').classList.add('open');
+}
+
+async function saveTariff() {
+  const service = document.getElementById('tariff-service').value;
+  const base = document.getElementById('tariff-base').value;
+  const perKm = document.getElementById('tariff-perkm').value;
+  try {
+    const data = await apiFetch('/api/admin/tariff', { method: 'PUT', body: JSON.stringify({ service_type: service, base_fare: parseInt(base), per_km: parseInt(perKm) }) });
+    closeModal('tariff-modal');
+    showToast(`Tarif ${service} berhasil diperbarui!`);
+  } catch(e) { showToast('Gagal menyimpan tarif', 'error'); }
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ===== HELPERS =====
+function getStatusBadge(status) {
+  const map = { searching:'badge-warning', pending:'badge-warning', accepted:'badge-info', on_the_way:'badge-purple', arrived:'badge-purple', in_progress:'badge-purple', confirmed:'badge-info', completed:'badge-success', cancelled:'badge-danger', rejected:'badge-danger', no_driver:'badge-danger' };
+  return map[status] || 'badge-gray';
+}
+
+function formatStatus(status) {
+  const map = { searching:'⏳ Mencari', pending:'⏳ Pending', accepted:'✅ Diterima', on_the_way:'🚗 Menuju', arrived:'📍 Tiba', in_progress:'🔄 Berjalan', confirmed:'📋 Dikonfirmasi', completed:'✓ Selesai', cancelled:'✗ Dibatalkan', rejected:'✗ Ditolak', no_driver:'❌ Tdk Ada Driver' };
+  return map[status] || status;
+}
+
+// ===== SOCKET.IO =====
+function initSocket() {
+  try {
+    const socket = io();
+    socket.on('connect', () => {
+      console.log('Socket.io terhubung');
+      if (currentUser) {
+        socket.emit('join', { userId: currentUser.id, role: currentUser.role });
+        if (currentUser.role === 'admin') socket.emit('admin_join');
+      }
+    });
+    socket.on('order_update', (data) => {
+      showToast(`Pesanan ${data.orderId?.substring(0,8)} → ${data.status}`, 'info');
+    });
+    socket.on('sos_alert', (data) => {
+      showToast(`🚨 ${data.message}`, 'error');
+      document.getElementById('sos-badge').style.display = '';
+      document.getElementById('notif-dot').style.display = '';
+    });
+    socket.on('driver_location', (data) => {
+      // In production: update map marker position
+    });
+  } catch(e) { console.log('Socket.io tidak tersedia'); }
+}
+
+// ===== SIDEBAR TOGGLE =====
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+// ===== AUTO-LOGIN =====
+async function autoLogin() {
+  if (authToken) {
+    try {
+      const data = await apiFetch('/api/auth/me');
+      if (data.success) {
+        currentUser = data.data.user;
+        document.getElementById('login-page').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+        initApp();
+        return;
+      }
+    } catch(e) {}
+    localStorage.removeItem('gonab_token');
+    authToken = null;
+  }
+}
+
+// Enter key for login
+document.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter' && document.getElementById('login-page').style.display !== 'none') doLogin();
+});
+
+// Init
+window.onload = () => autoLogin();
+</script>
+</body>
+</html>

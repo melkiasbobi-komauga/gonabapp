@@ -1,120 +1,227 @@
-const { v4: uuidv4 } = require('uuid');
-const { getMockDB } = require('../config/database');
+const { query } = require('../config/database');
 const { sendSuccess, sendError } = require('../utils/helpers');
 
-// GET /api/drivers - Driver terdekat
+// ─── GET /api/drivers/nearby ─────────────────────────────────
 const getNearbyDrivers = async (req, res) => {
   try {
     const { lat, lng, radius = 5, vehicle_type } = req.query;
     if (!lat || !lng) return sendError(res, 'Koordinat lokasi wajib diisi.');
-    const { findNearbyDrivers } = require('../utils/helpers');
-    const db = getMockDB();
-    const drivers = findNearbyDrivers(db, parseFloat(lat), parseFloat(lng), parseFloat(radius), vehicle_type || null);
-    const enriched = drivers.map(d => {
-      const user = db.users.find(u => u.id === d.user_id);
-      return {
-        id: d.id, name: user?.name, vehicle_type: d.vehicle_type,
-        vehicle_plate: d.vehicle_plate, vehicle_model: d.vehicle_model,
-        vehicle_color: d.vehicle_color, rating: d.rating,
-        total_trips: d.total_trips, distance: d._distance,
-        current_lat: d.current_lat, current_lng: d.current_lng
-      };
-    });
-    return sendSuccess(res, { drivers: enriched, count: enriched.length });
+
+    const params = [parseFloat(lng), parseFloat(lat), parseFloat(radius) * 1000];
+    let vehicleFilter = '';
+    if (vehicle_type) {
+      params.push(vehicle_type);
+      vehicleFilter = `AND d.vehicle_type = $${params.length}`;
+    }
+
+    const { rows } = await query(
+      `SELECT d.id, u.name, u.phone, u.avatar AS profile_photo,
+              d.vehicle_type, d.vehicle_plate, d.vehicle_model, d.vehicle_color,
+              d.rating, d.total_trips, d.is_verified,
+              ST_Y(d.location::geometry) AS current_lat,
+              ST_X(d.location::geometry) AS current_lng,
+              ST_Distance(
+                d.location::geography,
+                ST_SetSRID(ST_MakePoint($1,$2),4326)::geography
+              ) / 1000 AS distance_km
+       FROM drivers d
+       JOIN users u ON u.id = d.user_id
+       WHERE d.is_online = TRUE
+         AND d.is_verified = TRUE
+         AND d.location IS NOT NULL
+         AND ST_DWithin(
+           d.location::geography,
+           ST_SetSRID(ST_MakePoint($1,$2),4326)::geography, $3
+         )
+         ${vehicleFilter}
+       ORDER BY distance_km ASC`,
+      params
+    );
+    return sendSuccess(res, { drivers: rows, count: rows.length });
   } catch (err) {
     return sendError(res, 'Gagal mengambil driver terdekat: ' + err.message, 500);
   }
 };
 
-// PUT /api/driver/location - Update lokasi driver
+// ─── PUT /api/drivers/location ───────────────────────────────
 const updateDriverLocation = async (req, res) => {
   try {
     const { lat, lng } = req.body;
-    if (!lat || !lng) return sendError(res, 'Koordinat lokasi wajib diisi.');
-    const db = getMockDB();
-    const driverIdx = db.drivers.findIndex(d => d.user_id === req.user.id);
-    if (driverIdx === -1) return sendError(res, 'Profil driver tidak ditemukan.', 404);
-    db.drivers[driverIdx].current_lat = parseFloat(lat);
-    db.drivers[driverIdx].current_lng = parseFloat(lng);
-    db.drivers[driverIdx].location_updated_at = new Date().toISOString();
-    return sendSuccess(res, { location: { lat: parseFloat(lat), lng: parseFloat(lng) } }, 'Lokasi driver diperbarui.');
+    if (!lat || !lng) return sendError(res, 'Koordinat wajib diisi.');
+
+    const driverRes = await query(
+      `SELECT id FROM drivers WHERE user_id = $1`, [req.user.id]);
+    if (!driverRes.rows.length) return sendError(res, 'Data driver tidak ditemukan.', 404);
+
+    await query(
+      `UPDATE drivers SET
+         location = ST_SetSRID(ST_MakePoint($1,$2),4326),
+         location_updated_at = NOW()
+       WHERE id = $3`,
+      [parseFloat(lng), parseFloat(lat), driverRes.rows[0].id]
+    );
+    return sendSuccess(res, { lat, lng }, 'Lokasi berhasil diperbarui.');
   } catch (err) {
     return sendError(res, 'Gagal memperbarui lokasi: ' + err.message, 500);
   }
 };
 
-// PUT /api/driver/toggle-online - Toggle online/offline
+// ─── PUT /api/drivers/online ──────────────────────────────────
 const toggleOnlineStatus = async (req, res) => {
   try {
-    const db = getMockDB();
-    const driverIdx = db.drivers.findIndex(d => d.user_id === req.user.id);
-    if (driverIdx === -1) return sendError(res, 'Profil driver tidak ditemukan.', 404);
-    if (!db.drivers[driverIdx].is_verified) return sendError(res, 'Akun driver belum diverifikasi oleh admin.');
-    db.drivers[driverIdx].is_online = !db.drivers[driverIdx].is_online;
-    return sendSuccess(res, { is_online: db.drivers[driverIdx].is_online },
-      `Status driver: ${db.drivers[driverIdx].is_online ? '🟢 Online' : '🔴 Offline'}`);
+    const { is_online } = req.body;
+    const driverRes = await query(
+      `SELECT id FROM drivers WHERE user_id = $1`, [req.user.id]);
+    if (!driverRes.rows.length) return sendError(res, 'Data driver tidak ditemukan.', 404);
+
+    const { rows } = await query(
+      `UPDATE drivers SET is_online = $1 WHERE id = $2 RETURNING id, is_online`,
+      [is_online !== false, driverRes.rows[0].id]
+    );
+    return sendSuccess(res, { driver: rows[0] },
+      `Status ${rows[0].is_online ? 'Online' : 'Offline'}`);
   } catch (err) {
     return sendError(res, 'Gagal mengubah status: ' + err.message, 500);
   }
 };
 
-// POST /api/driver/register - Daftar sebagai driver
-const registerDriver = async (req, res) => {
+// ─── GET /api/drivers/profile ─────────────────────────────────
+const getDriverProfile = async (req, res) => {
   try {
-    const { vehicle_type, vehicle_plate, vehicle_model, vehicle_color, ktp_number, sim_number, stnk_number } = req.body;
-    if (!vehicle_type || !vehicle_plate || !ktp_number || !sim_number) {
-      return sendError(res, 'Data kendaraan dan dokumen wajib diisi.');
-    }
-    const db = getMockDB();
-    const existing = db.drivers.find(d => d.user_id === req.user.id);
-    if (existing) return sendError(res, 'Anda sudah terdaftar sebagai driver.');
-    const newDriver = {
-      id: uuidv4(), user_id: req.user.id,
-      vehicle_type: vehicle_type.toLowerCase(),
-      vehicle_plate: vehicle_plate.toUpperCase(),
-      vehicle_model: vehicle_model || '',
-      vehicle_color: vehicle_color || '',
-      ktp_number, sim_number, stnk_number: stnk_number || '',
-      is_verified: false, is_online: false,
-      current_lat: -3.3640, current_lng: 135.4960,
-      rating: 0, total_trips: 0,
-      created_at: new Date().toISOString()
-    };
-    db.drivers.push(newDriver);
-    // Update user role
-    const userIdx = db.users.findIndex(u => u.id === req.user.id);
-    db.users[userIdx].role = 'driver';
-    return sendSuccess(res, { driver: newDriver }, 'Pendaftaran driver berhasil! Menunggu verifikasi admin.', 201);
+    const { rows } = await query(
+      `SELECT d.*, u.name, u.phone, u.email, u.avatar AS profile_photo, u.wallet_balance,
+              ST_Y(d.location::geometry) AS current_lat,
+              ST_X(d.location::geometry) AS current_lng
+       FROM drivers d JOIN users u ON u.id = d.user_id
+       WHERE d.user_id = $1`, [req.user.id]);
+    if (!rows.length) return sendError(res, 'Profil driver tidak ditemukan.', 404);
+    return sendSuccess(res, { driver: rows[0] });
   } catch (err) {
-    return sendError(res, 'Gagal mendaftar driver: ' + err.message, 500);
+    return sendError(res, 'Gagal mengambil profil: ' + err.message, 500);
   }
 };
 
-// GET /api/driver/earnings
-const getDriverEarnings = async (req, res) => {
+// ─── GET /api/drivers/orders ──────────────────────────────────
+const getDriverOrders = async (req, res) => {
   try {
-    const db = getMockDB();
-    const driver = db.drivers.find(d => d.user_id === req.user.id);
-    if (!driver) return sendError(res, 'Profil driver tidak ditemukan.', 404);
-    const completedOrders = db.orders.filter(o => o.driver_id === driver.id && o.status === 'completed');
-    const totalEarnings = completedOrders.reduce((sum, o) => sum + Math.floor(o.total_amount * 0.8), 0);
-    const todayOrders = completedOrders.filter(o => {
-      const orderDate = new Date(o.completed_at || o.created_at).toDateString();
-      return orderDate === new Date().toDateString();
-    });
-    const todayEarnings = todayOrders.reduce((sum, o) => sum + Math.floor(o.total_amount * 0.8), 0);
-    const user = db.users.find(u => u.id === req.user.id);
+    const { status, page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+
+    const driverRes = await query(
+      `SELECT id FROM drivers WHERE user_id = $1`, [req.user.id]);
+    if (!driverRes.rows.length) return sendError(res, 'Data driver tidak ditemukan.', 404);
+    const driverId = driverRes.rows[0].id;
+
+    const params = [driverId];
+    let where = `WHERE o.driver_id = $1`;
+    if (status) { params.push(status); where += ` AND o.status=$${params.length}`; }
+
+    const countRes = await query(`SELECT COUNT(*) FROM orders o ${where}`, params);
+    params.push(parseInt(limit), offset);
+    const { rows } = await query(
+      `SELECT o.*, u.name AS user_name, u.phone AS user_phone
+       FROM orders o JOIN users u ON u.id=o.user_id
+       ${where} ORDER BY o.created_at DESC
+       LIMIT $${params.length-1} OFFSET $${params.length}`, params);
+
     return sendSuccess(res, {
-      wallet_balance: user.wallet_balance,
-      total_earnings: totalEarnings,
-      today_earnings: todayEarnings,
-      total_trips: driver.total_trips,
-      today_trips: todayOrders.length,
-      rating: driver.rating
+      orders: rows,
+      total: parseInt(countRes.rows[0].count),
+      page: parseInt(page),
+      total_pages: Math.ceil(countRes.rows[0].count / limit)
+    });
+  } catch (err) {
+    return sendError(res, 'Gagal mengambil riwayat order: ' + err.message, 500);
+  }
+};
+
+// ─── PUT /api/drivers/orders/:id/status ──────────────────────
+const updateOrderStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, lat, lng } = req.body;
+    const allowed = ['accepted', 'on_the_way', 'arrived', 'in_progress', 'completed', 'cancelled'];
+    if (!allowed.includes(status)) return sendError(res, 'Status tidak valid.');
+
+    const driverRes = await query(
+      `SELECT id FROM drivers WHERE user_id=$1`, [req.user.id]);
+    if (!driverRes.rows.length) return sendError(res, 'Data driver tidak ditemukan.', 404);
+
+    const extra = {};
+    if (status === 'completed') extra.completed_at = 'NOW()';
+    if (status === 'accepted')  extra.accepted_at  = 'NOW()';
+
+    const setExtra = Object.keys(extra).map(k => `${k}=${extra[k]}`).join(', ');
+    const { rows } = await query(
+      `UPDATE orders SET status=$1 ${setExtra ? ',' + setExtra : ''}
+       WHERE id=$2 AND driver_id=$3
+       RETURNING *`,
+      [status, id, driverRes.rows[0].id]
+    );
+    if (!rows.length) return sendError(res, 'Order tidak ditemukan atau bukan milik driver ini.', 404);
+
+    // Update driver location if provided
+    if (lat && lng) {
+      await query(
+        `UPDATE drivers SET location=ST_SetSRID(ST_MakePoint($1,$2),4326), location_updated_at=NOW()
+         WHERE id=$3`, [parseFloat(lng), parseFloat(lat), driverRes.rows[0].id]);
+    }
+
+    // Update total_trips on completion
+    if (status === 'completed') {
+      await query(`UPDATE drivers SET total_trips=total_trips+1 WHERE id=$1`, [driverRes.rows[0].id]);
+    }
+
+    return sendSuccess(res, { order: rows[0] }, `Status order diperbarui menjadi ${status}.`);
+  } catch (err) {
+    return sendError(res, 'Gagal memperbarui status order: ' + err.message, 500);
+  }
+};
+
+// ─── GET /api/drivers/earnings ───────────────────────────────
+const getEarnings = async (req, res) => {
+  try {
+    const { period = 'today' } = req.query;
+    const driverRes = await query(
+      `SELECT id FROM drivers WHERE user_id=$1`, [req.user.id]);
+    if (!driverRes.rows.length) return sendError(res, 'Data driver tidak ditemukan.', 404);
+    const driverId = driverRes.rows[0].id;
+
+    const intervalMap = { today: '1 day', week: '7 days', month: '30 days' };
+    const interval = intervalMap[period] || '1 day';
+
+    const [summary, breakdown] = await Promise.all([
+      query(
+        `SELECT COUNT(*) AS trips,
+                COALESCE(SUM(total_amount - service_fee),0) AS earnings,
+                COALESCE(SUM(distance_km),0) AS total_km,
+                COALESCE(AVG(user_rating),0) AS avg_rating
+         FROM orders
+         WHERE driver_id=$1 AND status='completed'
+           AND completed_at >= NOW() - INTERVAL '${interval}'`,
+        [driverId]),
+      query(
+        `SELECT DATE(completed_at) AS date,
+                COUNT(*) AS trips,
+                SUM(total_amount - service_fee) AS earnings
+         FROM orders
+         WHERE driver_id=$1 AND status='completed'
+           AND completed_at >= NOW() - INTERVAL '30 days'
+         GROUP BY DATE(completed_at) ORDER BY date DESC`,
+        [driverId])
+    ]);
+
+    return sendSuccess(res, {
+      summary: summary.rows[0],
+      daily_breakdown: breakdown.rows,
+      period
     });
   } catch (err) {
     return sendError(res, 'Gagal mengambil pendapatan: ' + err.message, 500);
   }
 };
 
-module.exports = { getNearbyDrivers, updateDriverLocation, toggleOnlineStatus, registerDriver, getDriverEarnings };
+module.exports = {
+  getNearbyDrivers, updateDriverLocation, toggleOnlineStatus,
+  getDriverProfile, getDriverOrders, updateOrderStatus, getEarnings
+};

@@ -1,190 +1,219 @@
 const { v4: uuidv4 } = require('uuid');
-const { getMockDB } = require('../config/database');
+const { query, withTransaction } = require('../config/database');
 const { sendSuccess, sendError } = require('../utils/helpers');
 
-// GET /api/merchants - Daftar toko
+// ─── GET /api/merchants ──────────────────────────────────────
 const getMerchants = async (req, res) => {
   try {
     const { search, category, lat, lng, radius = 10 } = req.query;
-    const db = getMockDB();
-    let merchants = db.merchants.filter(m => m.is_verified);
+    let whereClause = 'WHERE m.is_verified = TRUE';
+    const params = [];
+
     if (search) {
-      merchants = merchants.filter(m =>
-        m.store_name.toLowerCase().includes(search.toLowerCase()) ||
-        m.store_description.toLowerCase().includes(search.toLowerCase())
-      );
+      params.push(`%${search}%`);
+      whereClause += ` AND (m.store_name ILIKE $${params.length} OR m.store_description ILIKE $${params.length})`;
     }
-    if (category) merchants = merchants.filter(m => m.store_category === category);
-    return sendSuccess(res, { merchants, total: merchants.length });
+    if (category) {
+      params.push(category);
+      whereClause += ` AND m.store_category = $${params.length}`;
+    }
+    if (lat && lng) {
+      params.push(parseFloat(lng), parseFloat(lat), parseFloat(radius) * 1000);
+      whereClause += ` AND ST_DWithin(m.location::geography, ST_SetSRID(ST_MakePoint($${params.length-2},$${params.length-1}),4326)::geography, $${params.length})`;
+    }
+
+    const { rows } = await query(
+      `SELECT m.id, m.store_name, m.store_description, m.store_category,
+              m.store_address, m.phone, m.operating_hours,
+              m.is_open, m.is_verified, m.rating, m.total_orders,
+              m.banner_image, m.created_at,
+              ST_Y(m.location::geometry) AS lat,
+              ST_X(m.location::geometry) AS lng
+       FROM merchants m ${whereClause}
+       ORDER BY m.rating DESC, m.total_orders DESC`, params
+    );
+    return sendSuccess(res, { merchants: rows, total: rows.length });
   } catch (err) {
     return sendError(res, 'Gagal mengambil daftar toko: ' + err.message, 500);
   }
 };
 
-// GET /api/merchants/:id
+// ─── GET /api/merchants/:id ──────────────────────────────────
 const getMerchantById = async (req, res) => {
   try {
-    const db = getMockDB();
-    const merchant = db.merchants.find(m => m.id === req.params.id);
-    if (!merchant) return sendError(res, 'Toko tidak ditemukan.', 404);
-    const products = db.products.filter(p => p.merchant_id === merchant.id && p.is_available);
-    return sendSuccess(res, { merchant, products });
+    const { rows: mRows } = await query(
+      `SELECT m.*, u.name AS owner_name, u.phone AS owner_phone,
+              ST_Y(m.location::geometry) AS lat, ST_X(m.location::geometry) AS lng
+       FROM merchants m JOIN users u ON u.id = m.user_id WHERE m.id = $1`, [req.params.id]
+    );
+    if (!mRows.length) return sendError(res, 'Toko tidak ditemukan.', 404);
+    const { rows: products } = await query(
+      'SELECT * FROM products WHERE merchant_id = $1 AND is_available = TRUE ORDER BY name', [req.params.id]
+    );
+    return sendSuccess(res, { merchant: mRows[0], products });
   } catch (err) {
     return sendError(res, 'Gagal mengambil detail toko: ' + err.message, 500);
   }
 };
 
-// GET /api/products - Daftar produk semua toko
+// ─── GET /api/products ───────────────────────────────────────
 const getProducts = async (req, res) => {
   try {
     const { search, category, merchant_id, min_price, max_price, page = 1, limit = 20 } = req.query;
-    const db = getMockDB();
-    let products = db.products.filter(p => p.is_available);
-    if (search) products = products.filter(p => p.name.toLowerCase().includes(search.toLowerCase()));
-    if (category) products = products.filter(p => p.category === category);
-    if (merchant_id) products = products.filter(p => p.merchant_id === merchant_id);
-    if (min_price) products = products.filter(p => p.price >= parseInt(min_price));
-    if (max_price) products = products.filter(p => p.price <= parseInt(max_price));
-    const total = products.length;
-    const paginated = products.slice((page - 1) * limit, page * limit);
-    return sendSuccess(res, { products: paginated, total, page: parseInt(page), total_pages: Math.ceil(total / limit) });
+    const params = [];
+    let where = 'WHERE p.is_available = TRUE';
+    if (search)      { params.push(`%${search}%`);      where += ` AND (p.name ILIKE $${params.length} OR p.description ILIKE $${params.length})`; }
+    if (category)    { params.push(category);            where += ` AND p.category = $${params.length}`; }
+    if (merchant_id) { params.push(merchant_id);         where += ` AND p.merchant_id = $${params.length}`; }
+    if (min_price)   { params.push(parseInt(min_price)); where += ` AND p.price >= $${params.length}`; }
+    if (max_price)   { params.push(parseInt(max_price)); where += ` AND p.price <= $${params.length}`; }
+
+    const offset = (page - 1) * limit;
+    const { rows } = await query(
+      `SELECT p.*, m.store_name, m.is_open
+       FROM products p JOIN merchants m ON m.id = p.merchant_id
+       ${where} ORDER BY p.name
+       LIMIT $${params.length+1} OFFSET $${params.length+2}`,
+      [...params, limit, offset]
+    );
+    const { rows: cnt } = await query(`SELECT COUNT(*) FROM products p ${where}`, params);
+    return sendSuccess(res, { products: rows, total: parseInt(cnt[0].count), page: parseInt(page), total_pages: Math.ceil(parseInt(cnt[0].count)/limit) });
   } catch (err) {
     return sendError(res, 'Gagal mengambil produk: ' + err.message, 500);
   }
 };
 
-// POST /api/shop/order - Pesan produk dari toko
+// ─── POST /api/shop/order ────────────────────────────────────
 const createShopOrder = async (req, res) => {
   try {
     const { merchant_id, items, delivery_address, delivery_lat, delivery_lng, payment_method = 'cash', notes = '' } = req.body;
-    if (!merchant_id || !items || !items.length) {
+    if (!merchant_id || !items?.length)
       return sendError(res, 'Data pesanan tidak lengkap.');
-    }
-    const db = getMockDB();
-    const merchant = db.merchants.find(m => m.id === merchant_id);
-    if (!merchant) return sendError(res, 'Toko tidak ditemukan.', 404);
-    if (!merchant.is_open) return sendError(res, 'Maaf, toko ini sedang tutup.');
 
-    let totalAmount = 0;
-    const orderItems = [];
-    for (const item of items) {
-      const product = db.products.find(p => p.id === item.product_id);
-      if (!product) return sendError(res, `Produk dengan ID ${item.product_id} tidak ditemukan.`);
-      if (product.stock < item.quantity) return sendError(res, `Stok ${product.name} tidak mencukupi.`);
-      const subtotal = product.price * item.quantity;
-      totalAmount += subtotal;
-      orderItems.push({ product_id: product.id, name: product.name, price: product.price, quantity: item.quantity, subtotal });
-    }
+    const result = await withTransaction(async (client) => {
+      const { rows: mr } = await client.query('SELECT * FROM merchants WHERE id=$1 FOR UPDATE', [merchant_id]);
+      if (!mr.length) throw new Error('Toko tidak ditemukan.');
+      if (!mr[0].is_open) throw new Error('Maaf, toko ini sedang tutup.');
 
-    const deliveryFee = delivery_lat ? 10000 : 0;
-    totalAmount += deliveryFee;
-
-    if (payment_method === 'wallet') {
-      const userIdx = db.users.findIndex(u => u.id === req.user.id);
-      if (db.users[userIdx].wallet_balance < totalAmount) {
-        return sendError(res, 'Saldo GooWallet tidak cukup.');
+      let totalAmount = 0;
+      const orderItems = [];
+      for (const item of items) {
+        const { rows: pr } = await client.query('SELECT * FROM products WHERE id=$1 FOR UPDATE', [item.product_id]);
+        if (!pr.length) throw new Error(`Produk ${item.product_id} tidak ditemukan.`);
+        if (pr[0].stock < item.quantity) throw new Error(`Stok ${pr[0].name} tidak mencukupi.`);
+        const subtotal = Number(pr[0].price) * item.quantity;
+        totalAmount += subtotal;
+        orderItems.push({ product_id: pr[0].id, name: pr[0].name, price: Number(pr[0].price), quantity: item.quantity, subtotal });
+        await client.query('UPDATE products SET stock = stock - $1 WHERE id=$2', [item.quantity, item.product_id]);
       }
-      db.users[userIdx].wallet_balance -= totalAmount;
-    }
 
-    // Reduce stock
-    for (const item of items) {
-      const pIdx = db.products.findIndex(p => p.id === item.product_id);
-      db.products[pIdx].stock -= item.quantity;
-    }
+      const deliveryFee = delivery_lat ? 10000 : 0;
+      totalAmount += deliveryFee;
 
-    const newOrder = {
-      id: uuidv4(),
-      order_number: `GRP-${Date.now()}`,
-      user_id: req.user.id,
-      merchant_id,
-      service_type: 'GooShop',
-      items: orderItems,
-      delivery_address: delivery_address || 'Ambil sendiri di toko',
-      delivery_lat: delivery_lat || null,
-      delivery_lng: delivery_lng || null,
-      delivery_fee: deliveryFee,
-      total_amount: totalAmount,
-      payment_method,
-      status: 'pending',
-      notes,
-      created_at: new Date().toISOString()
-    };
-    db.orders.push(newOrder);
-    return sendSuccess(res, { order: newOrder }, 'Pesanan ke toko berhasil dibuat!', 201);
+      if (payment_method === 'wallet') {
+        const { rows: uw } = await client.query('SELECT wallet_balance FROM users WHERE id=$1 FOR UPDATE', [req.user.id]);
+        if (Number(uw[0].wallet_balance) < totalAmount)
+          throw new Error('Saldo GooWallet tidak cukup.');
+        await client.query('UPDATE users SET wallet_balance = wallet_balance - $1 WHERE id=$2', [totalAmount, req.user.id]);
+      }
+
+      const orderId = uuidv4();
+      const destPoint = delivery_lat
+        ? `ST_SetSRID(ST_MakePoint(${parseFloat(delivery_lng)},${parseFloat(delivery_lat)}),4326)`
+        : 'NULL';
+      const { rows: orderRows } = await client.query(
+        `INSERT INTO orders (id, order_number, user_id, merchant_id, service_type,
+           destination_point, destination_address,
+           delivery_fee, total_amount, payment_method, payment_status, status, items, notes)
+         VALUES ($1,$2,$3,$4,'GooShop',
+           ${destPoint}, $5,
+           $6,$7,$8,$9,'pending',$10,$11)
+         RETURNING id, order_number, status, total_amount, created_at`,
+        [orderId, `GRP-${Date.now()}`, req.user.id, merchant_id,
+         delivery_address || 'Ambil sendiri',
+         deliveryFee, totalAmount, payment_method,
+         payment_method === 'wallet' ? 'paid' : 'pending',
+         JSON.stringify(orderItems), notes]
+      );
+      await client.query('UPDATE merchants SET total_orders = total_orders+1 WHERE id=$1', [merchant_id]);
+      return orderRows[0];
+    });
+    return sendSuccess(res, { order: result }, 'Pesanan ke toko berhasil dibuat!', 201);
   } catch (err) {
-    return sendError(res, 'Gagal membuat pesanan toko: ' + err.message, 500);
+    return sendError(res, err.message, 400);
   }
 };
 
-// Merchant: GET /api/merchant/orders
+// ─── Merchant: GET /api/merchant/orders ─────────────────────
 const getMerchantOrders = async (req, res) => {
   try {
-    const db = getMockDB();
-    const merchant = db.merchants.find(m => m.user_id === req.user.id);
-    if (!merchant) return sendError(res, 'Profil merchant tidak ditemukan.', 404);
-    const orders = db.orders.filter(o => o.merchant_id === merchant.id)
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    return sendSuccess(res, { orders, total: orders.length });
+    const { rows: mr } = await query('SELECT id FROM merchants WHERE user_id=$1', [req.user.id]);
+    if (!mr.length) return sendError(res, 'Profil merchant tidak ditemukan.', 404);
+    const { rows } = await query(
+      `SELECT o.*, u.name AS customer_name, u.phone AS customer_phone
+       FROM orders o JOIN users u ON u.id = o.user_id
+       WHERE o.merchant_id=$1 ORDER BY o.created_at DESC LIMIT 100`,
+      [mr[0].id]
+    );
+    return sendSuccess(res, { orders: rows, total: rows.length });
   } catch (err) {
-    return sendError(res, 'Gagal mengambil pesanan merchant: ' + err.message, 500);
+    return sendError(res, 'Gagal mengambil pesanan: ' + err.message, 500);
   }
 };
 
-// Merchant: PUT /api/merchant/orders/:id/status
+// ─── Merchant: PUT /api/merchant/orders/:id/status ──────────
 const updateMerchantOrderStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const db = getMockDB();
-    const merchant = db.merchants.find(m => m.user_id === req.user.id);
-    if (!merchant) return sendError(res, 'Profil merchant tidak ditemukan.', 404);
-    const orderIdx = db.orders.findIndex(o => o.id === req.params.id && o.merchant_id === merchant.id);
-    if (orderIdx === -1) return sendError(res, 'Pesanan tidak ditemukan.', 404);
-    db.orders[orderIdx].status = status;
-    if (status === 'completed') {
-      db.orders[orderIdx].completed_at = new Date().toISOString();
-      const mIdx = db.merchants.findIndex(m => m.id === merchant.id);
-      db.merchants[mIdx].total_orders += 1;
-    }
-    return sendSuccess(res, { order: db.orders[orderIdx] }, 'Status pesanan diperbarui.');
+    const { rows: mr } = await query('SELECT id FROM merchants WHERE user_id=$1', [req.user.id]);
+    if (!mr.length) return sendError(res, 'Profil merchant tidak ditemukan.', 404);
+    const { rows } = await query(
+      'UPDATE orders SET status=$1 WHERE id=$2 AND merchant_id=$3 RETURNING id, order_number, status',
+      [status, req.params.id, mr[0].id]
+    );
+    if (!rows.length) return sendError(res, 'Pesanan tidak ditemukan.', 404);
+    return sendSuccess(res, { order: rows[0] }, 'Status pesanan diperbarui.');
   } catch (err) {
-    return sendError(res, 'Gagal memperbarui status: ' + err.message, 500);
+    return sendError(res, 'Gagal memperbarui: ' + err.message, 500);
   }
 };
 
-// Merchant: POST /api/merchant/products
+// ─── Merchant: POST /api/merchant/products ──────────────────
 const addProduct = async (req, res) => {
   try {
     const { name, description, price, stock, category } = req.body;
-    if (!name || !price || !stock) return sendError(res, 'Nama, harga, dan stok wajib diisi.');
-    const db = getMockDB();
-    const merchant = db.merchants.find(m => m.user_id === req.user.id);
-    if (!merchant) return sendError(res, 'Profil merchant tidak ditemukan.', 404);
-    const newProduct = {
-      id: uuidv4(), merchant_id: merchant.id, name: name.trim(),
-      description: description || '', price: parseInt(price), stock: parseInt(stock),
-      category: category || 'Umum', image: null, is_available: true,
-      created_at: new Date().toISOString()
-    };
-    db.products.push(newProduct);
-    return sendSuccess(res, { product: newProduct }, 'Produk berhasil ditambahkan!', 201);
+    if (!name || !price || stock === undefined)
+      return sendError(res, 'Nama, harga, dan stok wajib diisi.');
+    const { rows: mr } = await query('SELECT id FROM merchants WHERE user_id=$1', [req.user.id]);
+    if (!mr.length) return sendError(res, 'Profil merchant tidak ditemukan.', 404);
+    const { rows } = await query(
+      `INSERT INTO products (id, merchant_id, name, description, price, stock, category)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING *`,
+      [uuidv4(), mr[0].id, name.trim(), description || '', parseInt(price), parseInt(stock), category || 'Umum']
+    );
+    return sendSuccess(res, { product: rows[0] }, 'Produk berhasil ditambahkan!', 201);
   } catch (err) {
     return sendError(res, 'Gagal menambahkan produk: ' + err.message, 500);
   }
 };
 
-// Merchant: Toggle store open/close
+// ─── Merchant: PUT /api/merchant/toggle-status ──────────────
 const toggleStoreStatus = async (req, res) => {
   try {
-    const db = getMockDB();
-    const mIdx = db.merchants.findIndex(m => m.user_id === req.user.id);
-    if (mIdx === -1) return sendError(res, 'Profil merchant tidak ditemukan.', 404);
-    db.merchants[mIdx].is_open = !db.merchants[mIdx].is_open;
-    return sendSuccess(res, { is_open: db.merchants[mIdx].is_open },
-      `Toko ${db.merchants[mIdx].is_open ? 'dibuka' : 'ditutup'} berhasil.`);
+    const { rows } = await query(
+      'UPDATE merchants SET is_open = NOT is_open WHERE user_id=$1 RETURNING is_open, store_name',
+      [req.user.id]
+    );
+    if (!rows.length) return sendError(res, 'Profil merchant tidak ditemukan.', 404);
+    return sendSuccess(res, { is_open: rows[0].is_open },
+      `Toko ${rows[0].is_open ? 'dibuka' : 'ditutup'} berhasil.`);
   } catch (err) {
     return sendError(res, 'Gagal memperbarui status toko: ' + err.message, 500);
   }
 };
 
-module.exports = { getMerchants, getMerchantById, getProducts, createShopOrder, getMerchantOrders, updateMerchantOrderStatus, addProduct, toggleStoreStatus };
+module.exports = {
+  getMerchants, getMerchantById, getProducts, createShopOrder,
+  getMerchantOrders, updateMerchantOrderStatus, addProduct, toggleStoreStatus
+};

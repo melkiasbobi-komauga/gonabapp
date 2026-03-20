@@ -1,212 +1,387 @@
-const { v4: uuidv4 } = require('uuid');
-const { getMockDB } = require('../config/database');
+const { query, withTransaction } = require('../config/database');
 const { sendSuccess, sendError } = require('../utils/helpers');
 
-// Admin: GET /api/admin/dashboard
+// ─── GET /api/admin/dashboard ────────────────────────────────
 const getDashboard = async (req, res) => {
   try {
-    const db = getMockDB();
-    const totalUsers = db.users.filter(u => u.role === 'customer').length;
-    const totalDrivers = db.drivers.length;
-    const verifiedDrivers = db.drivers.filter(d => d.is_verified).length;
-    const onlineDrivers = db.drivers.filter(d => d.is_online).length;
-    const totalMerchants = db.merchants.length;
-    const verifiedMerchants = db.merchants.filter(m => m.is_verified).length;
-    const totalOrders = db.orders.length;
-    const completedOrders = db.orders.filter(o => o.status === 'completed').length;
-    const pendingOrders = db.orders.filter(o => ['searching', 'pending', 'accepted'].includes(o.status)).length;
-    const totalRevenue = db.orders.filter(o => o.status === 'completed').reduce((sum, o) => sum + o.total_amount, 0);
-    const platformFee = Math.floor(totalRevenue * 0.2);
+    const [users, drivers, merchants, orders, revenue, todayStats] = await Promise.all([
+      query(`SELECT
+               COUNT(*) FILTER (WHERE role='customer')  AS total_users,
+               COUNT(*) FILTER (WHERE role='driver')    AS total_drivers,
+               COUNT(*) FILTER (WHERE role='merchant')  AS total_merchants
+             FROM users`),
+      query(`SELECT
+               COUNT(*) FILTER (WHERE is_verified=TRUE)  AS verified_drivers,
+               COUNT(*) FILTER (WHERE is_online=TRUE)    AS online_drivers
+             FROM drivers`),
+      query(`SELECT COUNT(*) FILTER (WHERE is_verified=TRUE) AS verified_merchants FROM merchants`),
+      query(`SELECT
+               COUNT(*)                                         AS total_orders,
+               COUNT(*) FILTER (WHERE status='completed')      AS completed_orders,
+               COUNT(*) FILTER (WHERE status IN ('searching','pending','accepted','on_the_way')) AS pending_orders
+             FROM orders`),
+      query(`SELECT COALESCE(SUM(total_amount),0) AS total_revenue,
+                    COALESCE(SUM(service_fee),0)   AS platform_fee
+             FROM orders WHERE status='completed'`),
+      query(`SELECT
+               COUNT(*) AS today_orders,
+               COALESCE(SUM(total_amount) FILTER (WHERE status='completed'),0) AS today_revenue
+             FROM orders WHERE DATE(created_at)=CURRENT_DATE`)
+    ]);
 
-    const today = new Date().toDateString();
-    const todayOrders = db.orders.filter(o => new Date(o.created_at).toDateString() === today);
-    const todayRevenue = todayOrders.filter(o => o.status === 'completed').reduce((sum, o) => sum + o.total_amount, 0);
+    const serviceBreakdown = await query(`
+      SELECT service_type, COUNT(*) AS cnt
+      FROM orders GROUP BY service_type ORDER BY cnt DESC`);
 
-    const serviceBreakdown = {};
-    db.orders.forEach(o => {
-      if (!serviceBreakdown[o.service_type]) serviceBreakdown[o.service_type] = 0;
-      serviceBreakdown[o.service_type]++;
-    });
-
-    const recentOrders = db.orders.slice(-10).reverse().map(o => {
-      const user = db.users.find(u => u.id === o.user_id);
-      return { ...o, user_name: user?.name || 'Unknown' };
-    });
+    const recentOrders = await query(`
+      SELECT o.*, u.name AS user_name, u.phone AS user_phone,
+             d.vehicle_type, du.name AS driver_name
+      FROM orders o
+      JOIN users u ON u.id = o.user_id
+      LEFT JOIN drivers d ON d.id = o.driver_id
+      LEFT JOIN users du ON du.id = d.user_id
+      ORDER BY o.created_at DESC LIMIT 10`);
 
     return sendSuccess(res, {
       stats: {
-        total_users: totalUsers,
-        total_drivers: totalDrivers,
-        verified_drivers: verifiedDrivers,
-        online_drivers: onlineDrivers,
-        total_merchants: totalMerchants,
-        verified_merchants: verifiedMerchants,
-        total_orders: totalOrders,
-        completed_orders: completedOrders,
-        pending_orders: pendingOrders,
-        total_revenue: totalRevenue,
-        platform_fee: platformFee,
-        today_orders: todayOrders.length,
-        today_revenue: todayRevenue
+        ...users.rows[0],
+        ...drivers.rows[0],
+        ...merchants.rows[0],
+        ...orders.rows[0],
+        ...revenue.rows[0],
+        ...todayStats.rows[0]
       },
-      service_breakdown: serviceBreakdown,
-      recent_orders: recentOrders
+      service_breakdown: serviceBreakdown.rows.reduce((acc, r) => {
+        acc[r.service_type] = parseInt(r.cnt); return acc;
+      }, {}),
+      recent_orders: recentOrders.rows
     });
   } catch (err) {
     return sendError(res, 'Gagal mengambil data dashboard: ' + err.message, 500);
   }
 };
 
-// Admin: GET /api/admin/users
-const getAllUsers = async (req, res) => {
+// ─── GET /api/admin/users ─────────────────────────────────────
+const getUsers = async (req, res) => {
   try {
-    const { role, search, page = 1, limit = 20 } = req.query;
-    const db = getMockDB();
-    let users = db.users.map(u => { const { password, ...u2 } = u; return u2; });
-    if (role) users = users.filter(u => u.role === role);
-    if (search) users = users.filter(u => u.name.toLowerCase().includes(search.toLowerCase()) || u.phone.includes(search));
-    users.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    const total = users.length;
-    const paginated = users.slice((page - 1) * limit, page * limit);
-    return sendSuccess(res, { users: paginated, total, page: parseInt(page), total_pages: Math.ceil(total / limit) });
+    const { search, role, page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+    const params = [];
+    let where = 'WHERE 1=1';
+    if (role) { params.push(role); where += ` AND u.role=$${params.length}`; }
+    if (search) {
+      params.push(`%${search}%`);
+      where += ` AND (u.name ILIKE $${params.length} OR u.phone ILIKE $${params.length})`;
+    }
+    const countRes = await query(`SELECT COUNT(*) FROM users u ${where}`, params);
+    params.push(parseInt(limit), offset);
+    const { rows } = await query(
+      `SELECT u.id, u.name, u.phone, u.email, u.role, u.wallet_balance,
+              u.is_verified, u.is_active, u.created_at,
+              COUNT(o.id) AS total_orders
+       FROM users u
+       LEFT JOIN orders o ON o.user_id = u.id
+       ${where}
+       GROUP BY u.id ORDER BY u.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+    return sendSuccess(res, {
+      users: rows,
+      total: parseInt(countRes.rows[0].count),
+      page: parseInt(page),
+      total_pages: Math.ceil(countRes.rows[0].count / limit)
+    });
   } catch (err) {
-    return sendError(res, 'Gagal mengambil data pengguna: ' + err.message, 500);
+    return sendError(res, 'Gagal mengambil daftar user: ' + err.message, 500);
   }
 };
 
-// Admin: PUT /api/admin/users/:id/toggle
-const toggleUserStatus = async (req, res) => {
+// ─── PUT /api/admin/users/:id/toggle ─────────────────────────
+const toggleUser = async (req, res) => {
   try {
-    const db = getMockDB();
-    const userIdx = db.users.findIndex(u => u.id === req.params.id);
-    if (userIdx === -1) return sendError(res, 'Pengguna tidak ditemukan.', 404);
-    if (db.users[userIdx].role === 'admin') return sendError(res, 'Tidak dapat menonaktifkan akun admin.');
-    db.users[userIdx].is_active = !db.users[userIdx].is_active;
-    return sendSuccess(res, { is_active: db.users[userIdx].is_active },
-      `Akun ${db.users[userIdx].is_active ? 'diaktifkan' : 'dinonaktifkan'} berhasil.`);
+    const { id } = req.params;
+    const { rows } = await query(
+      `UPDATE users SET is_active = NOT is_active WHERE id=$1 RETURNING id, name, is_active`, [id]);
+    if (!rows.length) return sendError(res, 'User tidak ditemukan.', 404);
+    return sendSuccess(res, { user: rows[0] }, `User ${rows[0].is_active ? 'diaktifkan' : 'dinonaktifkan'}.`);
   } catch (err) {
-    return sendError(res, 'Gagal mengubah status pengguna: ' + err.message, 500);
+    return sendError(res, 'Gagal mengubah status user: ' + err.message, 500);
   }
 };
 
-// Admin: GET /api/admin/drivers
-const getAllDrivers = async (req, res) => {
+// ─── GET /api/admin/drivers ───────────────────────────────────
+const getDrivers = async (req, res) => {
   try {
     const { verified, page = 1, limit = 20 } = req.query;
-    const db = getMockDB();
-    let drivers = db.drivers.map(d => {
-      const user = db.users.find(u => u.id === d.user_id);
-      return { ...d, user_name: user?.name, user_phone: user?.phone, user_email: user?.email };
+    const offset = (page - 1) * limit;
+    const params = [];
+    let where = 'WHERE 1=1';
+    if (verified !== undefined) {
+      params.push(verified === 'true');
+      where += ` AND d.is_verified=$${params.length}`;
+    }
+    const countRes = await query(`SELECT COUNT(*) FROM drivers d ${where}`, params);
+    params.push(parseInt(limit), offset);
+    const { rows } = await query(
+      `SELECT d.*, u.name, u.phone, u.email, u.avatar AS profile_photo,
+              ST_Y(d.location::geometry) AS current_lat,
+              ST_X(d.location::geometry) AS current_lng
+       FROM drivers d JOIN users u ON u.id=d.user_id
+       ${where} ORDER BY d.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+    return sendSuccess(res, {
+      drivers: rows,
+      total: parseInt(countRes.rows[0].count),
+      page: parseInt(page),
+      total_pages: Math.ceil(countRes.rows[0].count / limit)
     });
-    if (verified !== undefined) drivers = drivers.filter(d => d.is_verified === (verified === 'true'));
-    const total = drivers.length;
-    const paginated = drivers.slice((page - 1) * limit, page * limit);
-    return sendSuccess(res, { drivers: paginated, total, page: parseInt(page), total_pages: Math.ceil(total / limit) });
   } catch (err) {
-    return sendError(res, 'Gagal mengambil data driver: ' + err.message, 500);
+    return sendError(res, 'Gagal mengambil daftar driver: ' + err.message, 500);
   }
 };
 
-// Admin: PUT /api/admin/drivers/:id/verify
+// ─── PUT /api/admin/drivers/:id/verify ───────────────────────
 const verifyDriver = async (req, res) => {
   try {
-    const { action } = req.body; // 'approve' or 'reject'
-    const db = getMockDB();
-    const driverIdx = db.drivers.findIndex(d => d.id === req.params.id);
-    if (driverIdx === -1) return sendError(res, 'Driver tidak ditemukan.', 404);
-    db.drivers[driverIdx].is_verified = action === 'approve';
-    db.drivers[driverIdx].verified_at = new Date().toISOString();
-    db.adminLogs.push({
-      id: uuidv4(), admin_id: req.user.id, action: `driver_${action}`,
-      target_id: req.params.id, created_at: new Date().toISOString()
-    });
-    return sendSuccess(res, { driver: db.drivers[driverIdx] },
-      `Driver ${action === 'approve' ? 'diverifikasi' : 'ditolak'} berhasil.`);
+    const { id } = req.params;
+    const { verified } = req.body;
+    const { rows } = await query(
+      `UPDATE drivers SET is_verified=$1, verified_at=CASE WHEN $1 THEN NOW() ELSE NULL END
+       WHERE id=$2 RETURNING id, is_verified`,
+      [verified !== false, id]);
+    if (!rows.length) return sendError(res, 'Driver tidak ditemukan.', 404);
+    await query(
+      `INSERT INTO admin_logs(admin_id,action,target_type,target_id,description)
+       VALUES($1,'verify_driver','driver',$2,$3)`,
+      [req.user.id, id, `Driver ${rows[0].is_verified ? 'diverifikasi' : 'dibatalkan verifikasi'}`]);
+    return sendSuccess(res, { driver: rows[0] }, `Driver berhasil ${rows[0].is_verified ? 'diverifikasi' : 'dibatalkan'}.`);
   } catch (err) {
     return sendError(res, 'Gagal verifikasi driver: ' + err.message, 500);
   }
 };
 
-// Admin: GET /api/admin/merchants
-const getAllMerchants = async (req, res) => {
+// ─── GET /api/admin/merchants ────────────────────────────────
+const getMerchants = async (req, res) => {
   try {
     const { verified, page = 1, limit = 20 } = req.query;
-    const db = getMockDB();
-    let merchants = db.merchants.map(m => {
-      const user = db.users.find(u => u.id === m.user_id);
-      return { ...m, owner_name: user?.name, owner_phone: user?.phone };
+    const offset = (page - 1) * limit;
+    const params = [];
+    let where = 'WHERE 1=1';
+    if (verified !== undefined) {
+      params.push(verified === 'true');
+      where += ` AND m.is_verified=$${params.length}`;
+    }
+    const countRes = await query(`SELECT COUNT(*) FROM merchants m ${where}`, params);
+    params.push(parseInt(limit), offset);
+    const { rows } = await query(
+      `SELECT m.*, u.name AS owner_name, u.phone AS owner_phone,
+              ST_Y(m.location::geometry) AS lat, ST_X(m.location::geometry) AS lng
+       FROM merchants m JOIN users u ON u.id=m.user_id
+       ${where} ORDER BY m.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+    return sendSuccess(res, {
+      merchants: rows,
+      total: parseInt(countRes.rows[0].count),
+      page: parseInt(page),
+      total_pages: Math.ceil(countRes.rows[0].count / limit)
     });
-    if (verified !== undefined) merchants = merchants.filter(m => m.is_verified === (verified === 'true'));
-    const total = merchants.length;
-    const paginated = merchants.slice((page - 1) * limit, page * limit);
-    return sendSuccess(res, { merchants: paginated, total, page: parseInt(page), total_pages: Math.ceil(total / limit) });
   } catch (err) {
-    return sendError(res, 'Gagal mengambil data merchant: ' + err.message, 500);
+    return sendError(res, 'Gagal mengambil daftar merchant: ' + err.message, 500);
   }
 };
 
-// Admin: PUT /api/admin/merchants/:id/verify
+// ─── PUT /api/admin/merchants/:id/verify ─────────────────────
 const verifyMerchant = async (req, res) => {
   try {
-    const { action } = req.body;
-    const db = getMockDB();
-    const mIdx = db.merchants.findIndex(m => m.id === req.params.id);
-    if (mIdx === -1) return sendError(res, 'Merchant tidak ditemukan.', 404);
-    db.merchants[mIdx].is_verified = action === 'approve';
-    db.merchants[mIdx].verified_at = new Date().toISOString();
-    return sendSuccess(res, { merchant: db.merchants[mIdx] },
-      `Merchant ${action === 'approve' ? 'diverifikasi' : 'ditolak'} berhasil.`);
+    const { id } = req.params;
+    const { verified } = req.body;
+    const { rows } = await query(
+      `UPDATE merchants SET is_verified=$1 WHERE id=$2 RETURNING id, store_name, is_verified`,
+      [verified !== false, id]);
+    if (!rows.length) return sendError(res, 'Merchant tidak ditemukan.', 404);
+    await query(
+      `INSERT INTO admin_logs(admin_id,action,target_type,target_id,description)
+       VALUES($1,'verify_merchant','merchant',$2,$3)`,
+      [req.user.id, id, `Merchant ${rows[0].store_name} ${rows[0].is_verified ? 'diverifikasi' : 'dibatalkan'}`]);
+    return sendSuccess(res, { merchant: rows[0] });
   } catch (err) {
     return sendError(res, 'Gagal verifikasi merchant: ' + err.message, 500);
   }
 };
 
-// Admin: GET /api/admin/orders
-const getAllOrders = async (req, res) => {
+// ─── GET /api/admin/orders ───────────────────────────────────
+const getOrders = async (req, res) => {
   try {
     const { status, service_type, page = 1, limit = 20 } = req.query;
-    const db = getMockDB();
-    let orders = db.orders.map(o => {
-      const user = db.users.find(u => u.id === o.user_id);
-      const driver = db.drivers.find(d => d.id === o.driver_id);
-      const driverUser = driver ? db.users.find(u => u.id === driver.user_id) : null;
-      return { ...o, user_name: user?.name, driver_name: driverUser?.name };
+    const offset = (page - 1) * limit;
+    const params = [];
+    let where = 'WHERE 1=1';
+    if (status) { params.push(status); where += ` AND o.status=$${params.length}`; }
+    if (service_type) { params.push(service_type); where += ` AND o.service_type=$${params.length}`; }
+    const countRes = await query(`SELECT COUNT(*) FROM orders o ${where}`, params);
+    params.push(parseInt(limit), offset);
+    const { rows } = await query(
+      `SELECT o.*, u.name AS user_name, u.phone AS user_phone,
+              du.name AS driver_name, du.phone AS driver_phone
+       FROM orders o
+       JOIN users u ON u.id=o.user_id
+       LEFT JOIN drivers d ON d.id=o.driver_id
+       LEFT JOIN users du ON du.id=d.user_id
+       ${where} ORDER BY o.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+    return sendSuccess(res, {
+      orders: rows,
+      total: parseInt(countRes.rows[0].count),
+      page: parseInt(page),
+      total_pages: Math.ceil(countRes.rows[0].count / limit)
     });
-    if (status) orders = orders.filter(o => o.status === status);
-    if (service_type) orders = orders.filter(o => o.service_type === service_type);
-    orders.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    const total = orders.length;
-    const paginated = orders.slice((page - 1) * limit, page * limit);
-    return sendSuccess(res, { orders: paginated, total, page: parseInt(page), total_pages: Math.ceil(total / limit) });
   } catch (err) {
-    return sendError(res, 'Gagal mengambil data pesanan: ' + err.message, 500);
+    return sendError(res, 'Gagal mengambil daftar order: ' + err.message, 500);
   }
 };
 
-// Admin: Update tarif
+// ─── GET /api/admin/tariffs ──────────────────────────────────
+const getTariffs = async (req, res) => {
+  try {
+    const { rows } = await query(`SELECT * FROM tariffs ORDER BY service_type`);
+    return sendSuccess(res, { tariffs: rows });
+  } catch (err) {
+    return sendError(res, 'Gagal mengambil tarif: ' + err.message, 500);
+  }
+};
+
+// ─── PUT /api/admin/tariffs/:id ──────────────────────────────
 const updateTariff = async (req, res) => {
   try {
-    const { service_type, base_fare, per_km } = req.body;
-    // In production, this would update database
-    return sendSuccess(res, { service_type, base_fare, per_km }, `Tarif ${service_type} berhasil diperbarui.`);
+    const { id } = req.params;
+    const { base_fare, per_km_rate, min_fare, surge_multiplier } = req.body;
+    const fields = [];
+    const params = [];
+    if (base_fare !== undefined)       { params.push(base_fare);       fields.push(`base_fare=$${params.length}`); }
+    if (per_km_rate !== undefined)     { params.push(per_km_rate);     fields.push(`per_km_rate=$${params.length}`); }
+    if (min_fare !== undefined)        { params.push(min_fare);        fields.push(`min_fare=$${params.length}`); }
+    if (surge_multiplier !== undefined){ params.push(surge_multiplier);fields.push(`surge_multiplier=$${params.length}`); }
+    if (!fields.length) return sendError(res, 'Tidak ada data yang diubah.');
+    params.push(id);
+    const { rows } = await query(
+      `UPDATE tariffs SET ${fields.join(',')} WHERE id=$${params.length} RETURNING *`, params);
+    if (!rows.length) return sendError(res, 'Tarif tidak ditemukan.', 404);
+    await query(
+      `INSERT INTO admin_logs(admin_id,action,target_type,target_id,description)
+       VALUES($1,'update_tariff','tariff',$2,$3)`,
+      [req.user.id, id, `Tarif ${rows[0].service_type} diperbarui`]);
+    return sendSuccess(res, { tariff: rows[0] }, 'Tarif berhasil diperbarui.');
   } catch (err) {
     return sendError(res, 'Gagal memperbarui tarif: ' + err.message, 500);
   }
 };
 
-// Admin: GET /api/admin/sos
-const getSOSAlerts = async (req, res) => {
+// ─── GET /api/admin/sos ──────────────────────────────────────
+const getSosAlerts = async (req, res) => {
   try {
-    const db = getMockDB();
-    const sosOrders = db.orders.filter(o => o.sos_activated);
-    const enriched = sosOrders.map(o => {
-      const user = db.users.find(u => u.id === o.user_id);
-      return { ...o, user_name: user?.name, user_phone: user?.phone };
-    });
-    return sendSuccess(res, { alerts: enriched, count: enriched.length });
+    const { rows } = await query(`
+      SELECT o.id, o.order_number, o.service_type, o.status,
+             o.sos_at AS sos_triggered_at,
+             u.name AS user_name, u.phone AS user_phone,
+             du.name AS driver_name, du.phone AS driver_phone
+      FROM orders o
+      JOIN users u ON u.id=o.user_id
+      LEFT JOIN drivers d ON d.id=o.driver_id
+      LEFT JOIN users du ON du.id=d.user_id
+      WHERE o.sos_activated = TRUE
+      ORDER BY o.sos_at DESC LIMIT 50`);
+    return sendSuccess(res, { sos_alerts: rows, count: rows.length });
   } catch (err) {
     return sendError(res, 'Gagal mengambil data SOS: ' + err.message, 500);
   }
 };
 
-module.exports = { getDashboard, getAllUsers, toggleUserStatus, getAllDrivers, verifyDriver, getAllMerchants, verifyMerchant, getAllOrders, updateTariff, getSOSAlerts };
+// ─── GET /api/admin/logs ─────────────────────────────────────
+const getAdminLogs = async (req, res) => {
+  try {
+    const { page = 1, limit = 30 } = req.query;
+    const offset = (page - 1) * limit;
+    const countRes = await query(`SELECT COUNT(*) FROM admin_logs`);
+    const { rows } = await query(
+      `SELECT al.*, u.name AS admin_name
+       FROM admin_logs al JOIN users u ON u.id=al.admin_id
+       ORDER BY al.created_at DESC LIMIT $1 OFFSET $2`,
+      [parseInt(limit), offset]);
+    return sendSuccess(res, {
+      logs: rows,
+      total: parseInt(countRes.rows[0].count),
+      page: parseInt(page),
+      total_pages: Math.ceil(countRes.rows[0].count / limit)
+    });
+  } catch (err) {
+    return sendError(res, 'Gagal mengambil log admin: ' + err.message, 500);
+  }
+};
+
+// ─── GET /api/admin/map/drivers ──────────────────────────────
+const getDriversMap = async (req, res) => {
+  try {
+    const { rows } = await query(`
+      SELECT d.id, u.name, d.vehicle_type, d.vehicle_plate,
+             d.is_online, d.is_verified, d.rating,
+             ST_Y(d.location::geometry) AS lat,
+             ST_X(d.location::geometry) AS lng,
+             d.location_updated_at
+      FROM drivers d JOIN users u ON u.id=d.user_id
+      WHERE d.location IS NOT NULL ORDER BY d.location_updated_at DESC`);
+    return sendSuccess(res, { drivers: rows, count: rows.length });
+  } catch (err) {
+    return sendError(res, 'Gagal mengambil peta driver: ' + err.message, 500);
+  }
+};
+
+// ─── GET /api/admin/analytics ────────────────────────────────
+const getAnalytics = async (req, res) => {
+  try {
+    const { days = 7 } = req.query;
+    const [daily, serviceStats, topDrivers, topMerchants] = await Promise.all([
+      query(`
+        SELECT DATE(created_at) AS date,
+               COUNT(*) AS orders,
+               COUNT(*) FILTER (WHERE status='completed') AS completed,
+               COALESCE(SUM(total_amount) FILTER (WHERE status='completed'),0) AS revenue
+        FROM orders
+        WHERE created_at >= NOW() - INTERVAL '${parseInt(days)} days'
+        GROUP BY DATE(created_at) ORDER BY date ASC`),
+      query(`
+        SELECT service_type,
+               COUNT(*) AS total, COUNT(*) FILTER (WHERE status='completed') AS completed,
+               COALESCE(SUM(total_amount) FILTER (WHERE status='completed'),0) AS revenue,
+               COALESCE(AVG(user_rating),0) AS avg_rating
+        FROM orders GROUP BY service_type ORDER BY total DESC`),
+      query(`
+        SELECT d.id, u.name, d.vehicle_type, d.total_trips, d.rating,
+               COUNT(o.id) AS recent_orders,
+               COALESCE(SUM(o.service_fee)  FILTER (WHERE o.status='completed'),0) AS recent_revenue
+        FROM drivers d JOIN users u ON u.id=d.user_id
+        LEFT JOIN orders o ON o.driver_id=d.id AND o.created_at>=NOW()-INTERVAL '30 days'
+        GROUP BY d.id, u.name ORDER BY recent_orders DESC LIMIT 10`),
+      query(`
+        SELECT m.id, m.store_name, m.store_category, m.total_orders, m.rating,
+               COUNT(o.id) AS recent_orders
+        FROM merchants m
+        LEFT JOIN orders o ON o.merchant_id=m.id AND o.created_at>=NOW()-INTERVAL '30 days'
+        GROUP BY m.id ORDER BY recent_orders DESC LIMIT 10`)
+    ]);
+    return sendSuccess(res, {
+      daily_stats: daily.rows,
+      service_stats: serviceStats.rows,
+      top_drivers: topDrivers.rows,
+      top_merchants: topMerchants.rows
+    });
+  } catch (err) {
+    return sendError(res, 'Gagal mengambil analitik: ' + err.message, 500);
+  }
+};
+
+module.exports = {
+  getDashboard, getUsers, toggleUser,
+  getDrivers, verifyDriver,
+  getMerchants, verifyMerchant,
+  getOrders, getTariffs, updateTariff,
+  getSosAlerts, getAdminLogs, getDriversMap, getAnalytics
+};
